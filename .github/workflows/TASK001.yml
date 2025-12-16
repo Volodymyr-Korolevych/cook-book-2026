@@ -1,0 +1,1597 @@
+name: TASK001 - Create missing pages
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-task:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create/replace pages and supporting files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p pages/my
+          mkdir -p pages/recipes/[id]
+          mkdir -p middleware
+          mkdir -p composables
+
+          # ----------------------------
+          # composables/useAuthRedirect.ts
+          # ----------------------------
+          cat > composables/useAuthRedirect.ts <<'EOF'
+          // composables/useAuthRedirect.ts
+          // Small helper to show a styled message on /auth after redirects from protected pages.
+          // Uses a query param "msg". No browser alerts.
+          export function useAuthRedirect() {
+            const route = useRoute()
+
+            const authMessage = computed(() => {
+              const msg = route.query.msg
+              return typeof msg === 'string' ? msg : ''
+            })
+
+            return { authMessage }
+          }
+          EOF
+
+          # ----------------------------
+          # middleware/auth.ts
+          # ----------------------------
+          cat > middleware/auth.ts <<'EOF'
+          // middleware/auth.ts
+          export default defineNuxtRouteMiddleware(() => {
+            const user = useSupabaseUser()
+            if (!user.value) {
+              return navigateTo({
+                path: '/auth',
+                query: { msg: 'Будь ласка, увійдіть у свій акаунт' }
+              })
+            }
+          })
+          EOF
+
+          # ----------------------------
+          # pages/auth.vue
+          # ----------------------------
+          cat > pages/auth.vue <<'EOF'
+          <template>
+            <div class="max-w-lg mx-auto space-y-6">
+              <h1 class="text-2xl font-semibold">Вхід / Реєстрація</h1>
+
+              <!-- System message (from middleware redirect) -->
+              <div
+                v-if="authMessage"
+                class="border rounded-xl px-4 py-3 text-sm bg-gray-50 text-gray-800"
+              >
+                {{ authMessage }}
+              </div>
+
+              <!-- Tabs -->
+              <div class="flex gap-2">
+                <button
+                  type="button"
+                  class="px-4 py-2 rounded-full text-sm border"
+                  :class="mode === 'login' ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-300 hover:bg-gray-50'"
+                  @click="mode = 'login'"
+                >
+                  Вхід
+                </button>
+                <button
+                  type="button"
+                  class="px-4 py-2 rounded-full text-sm border"
+                  :class="mode === 'register' ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-300 hover:bg-gray-50'"
+                  @click="mode = 'register'"
+                >
+                  Реєстрація
+                </button>
+              </div>
+
+              <!-- Form -->
+              <form class="space-y-4" @submit.prevent="onSubmit">
+                <div v-if="mode === 'register'" class="space-y-1">
+                  <label class="text-sm font-medium">Ім’я</label>
+                  <input
+                    v-model="displayName"
+                    type="text"
+                    class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                    placeholder="Ваше ім’я"
+                  />
+                  <p v-if="errors.displayName" class="text-xs text-red-600">
+                    {{ errors.displayName }}
+                  </p>
+                </div>
+
+                <div class="space-y-1">
+                  <label class="text-sm font-medium">Email</label>
+                  <input
+                    v-model="email"
+                    type="email"
+                    class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                    placeholder="name@example.com"
+                  />
+                  <p v-if="errors.email" class="text-xs text-red-600">
+                    {{ errors.email }}
+                  </p>
+                </div>
+
+                <div class="space-y-1">
+                  <label class="text-sm font-medium">Пароль</label>
+                  <input
+                    v-model="password"
+                    type="password"
+                    class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                    placeholder="••••••••"
+                  />
+                  <p v-if="errors.password" class="text-xs text-red-600">
+                    {{ errors.password }}
+                  </p>
+                </div>
+
+                <div v-if="formError" class="border rounded-xl px-4 py-3 text-sm bg-gray-50 text-gray-800">
+                  {{ formError }}
+                </div>
+
+                <button
+                  type="submit"
+                  class="w-full rounded-full bg-primary text-white py-2 text-sm hover:bg-orange-500 transition"
+                  :disabled="loading"
+                >
+                  {{ loading ? 'Зачекайте…' : (mode === 'login' ? 'Увійти' : 'Зареєструватися') }}
+                </button>
+              </form>
+            </div>
+          </template>
+
+          <script setup lang="ts">
+          const router = useRouter()
+          const { addToast } = useToasts()
+          const { authMessage } = useAuthRedirect()
+          const { signIn, signUp } = useAuth()
+
+          const mode = ref<'login' | 'register'>('login')
+          const loading = ref(false)
+
+          const email = ref('')
+          const password = ref('')
+          const displayName = ref('')
+
+          const errors = reactive<{ email?: string; password?: string; displayName?: string }>({})
+          const formError = ref('')
+
+          const validate = () => {
+            errors.email = undefined
+            errors.password = undefined
+            errors.displayName = undefined
+            formError.value = ''
+
+            const e = email.value.trim()
+            const p = password.value
+
+            if (!e) errors.email = 'Вкажіть email'
+            else if (!/^\S+@\S+\.\S+$/.test(e)) errors.email = 'Вкажіть коректний email'
+
+            if (!p) errors.password = 'Вкажіть пароль'
+            else if (mode.value === 'register' && p.length < 6) errors.password = 'Пароль має містити щонайменше 6 символів'
+
+            if (mode.value === 'register') {
+              const dn = displayName.value.trim()
+              if (!dn) errors.displayName = 'Вкажіть ім’я'
+              else if (dn.length < 2) errors.displayName = 'Ім’я має містити щонайменше 2 символи'
+              else if (dn.length > 50) errors.displayName = 'Ім’я має бути не довше 50 символів'
+            }
+
+            return !errors.email && !errors.password && !errors.displayName
+          }
+
+          const onSubmit = async () => {
+            if (!validate()) return
+            loading.value = true
+            try {
+              if (mode.value === 'login') {
+                await signIn(email.value.trim(), password.value)
+                addToast('Ви увійшли в акаунт')
+              } else {
+                await signUp(email.value.trim(), password.value, displayName.value.trim())
+                addToast('Акаунт створено')
+              }
+              await router.push('/profile')
+            } catch (err: any) {
+              // keep it user-friendly
+              formError.value = mode.value === 'login'
+                ? 'Неправильний email або пароль'
+                : 'Не вдалося зареєструватися. Спробуйте ще раз'
+            } finally {
+              loading.value = false
+            }
+          }
+          </script>
+          EOF
+
+          # ----------------------------
+          # pages/profile.vue
+          # ----------------------------
+          cat > pages/profile.vue <<'EOF'
+          <template>
+            <div class="max-w-2xl mx-auto space-y-6">
+              <h1 class="text-2xl font-semibold">Профіль</h1>
+
+              <div class="border rounded-2xl p-5 flex items-center justify-between gap-4">
+                <div class="flex items-center gap-4">
+                  <div class="w-14 h-14 rounded-full bg-gray-200 flex items-center justify-center text-lg font-semibold">
+                    {{ initials }}
+                  </div>
+
+                  <div class="space-y-1">
+                    <div class="font-semibold">
+                      {{ profileName || 'Користувач' }}
+                    </div>
+                    <div v-if="user?.email" class="text-sm text-gray-600">
+                      {{ user.email }}
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  class="px-4 py-2 rounded-full border border-gray-300 text-sm hover:bg-gray-50"
+                  @click="onLogout"
+                >
+                  Вийти
+                </button>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <NuxtLink
+                  to="/my/recipes"
+                  class="border rounded-2xl p-4 hover:bg-gray-50 transition"
+                >
+                  <div class="font-semibold">Мої рецепти</div>
+                </NuxtLink>
+
+                <NuxtLink
+                  to="/my/saved"
+                  class="border rounded-2xl p-4 hover:bg-gray-50 transition"
+                >
+                  <div class="font-semibold">Збережені рецепти</div>
+                </NuxtLink>
+
+                <NuxtLink
+                  to="/recipes/create"
+                  class="border rounded-2xl p-4 hover:bg-gray-50 transition"
+                >
+                  <div class="font-semibold">Створити рецепт</div>
+                </NuxtLink>
+              </div>
+            </div>
+          </template>
+
+          <script setup lang="ts">
+          definePageMeta({ middleware: 'auth' })
+
+          const router = useRouter()
+          const client = useSupabaseClient()
+          const user = useSupabaseUser()
+          const { addToast } = useToasts()
+          const { signOut } = useAuth()
+
+          const profileName = ref<string>('')
+
+          const initials = computed(() => {
+            const email = user.value?.email || ''
+            return email ? email.charAt(0).toUpperCase() : 'U'
+          })
+
+          onMounted(async () => {
+            if (!user.value) return
+            const { data } = await client.from('profiles').select('display_name').eq('id', user.value.id).maybeSingle()
+            profileName.value = data?.display_name || ''
+          })
+
+          const onLogout = async () => {
+            await signOut()
+            addToast('Ви вийшли з акаунта')
+            router.push('/')
+          }
+          </script>
+          EOF
+
+          # ----------------------------
+          # pages/my/recipes.vue
+          # ----------------------------
+          cat > pages/my/recipes.vue <<'EOF'
+          <template>
+            <div class="space-y-6">
+              <div class="flex items-baseline justify-between gap-3">
+                <h1 class="text-2xl font-semibold">Мої рецепти</h1>
+                <NuxtLink
+                  to="/recipes/create"
+                  class="rounded-full bg-primary text-white text-sm px-4 py-2 hover:bg-orange-500 transition"
+                >
+                  Створити рецепт
+                </NuxtLink>
+              </div>
+
+              <p v-if="loaded && recipes.length === 0" class="text-sm text-gray-600">
+                У вас ще немає рецептів.
+              </p>
+
+              <RecipeGrid
+                v-else
+                :recipes="recipes"
+                @openMenu="openActionMenu"
+              />
+
+              <!-- Actions modal for author's recipe (Edit/Delete/Toggle status) -->
+              <teleport to="body">
+                <div v-if="showActions" class="fixed inset-0 z-40 bg-black/40 flex items-center justify-center">
+                  <div class="bg-white rounded-2xl shadow-lg w-full max-w-sm mx-4 p-5 space-y-3">
+                    <div class="font-semibold">
+                      Дії з рецептом
+                    </div>
+
+                    <button
+                      type="button"
+                      class="w-full text-left px-4 py-2 rounded-xl border border-gray-300 hover:bg-gray-50 text-sm"
+                      @click="goEdit"
+                    >
+                      Редагувати
+                    </button>
+
+                    <button
+                      type="button"
+                      class="w-full text-left px-4 py-2 rounded-xl border border-gray-300 hover:bg-gray-50 text-sm"
+                      @click="toggleStatus"
+                    >
+                      Змінити статус (публічний/приватний)
+                    </button>
+
+                    <button
+                      type="button"
+                      class="w-full text-left px-4 py-2 rounded-xl border border-gray-300 hover:bg-gray-50 text-sm"
+                      @click="openDeleteConfirm"
+                    >
+                      Видалити
+                    </button>
+
+                    <button
+                      type="button"
+                      class="w-full px-4 py-2 rounded-xl border border-gray-300 hover:bg-gray-50 text-sm"
+                      @click="closeActions"
+                    >
+                      Закрити
+                    </button>
+                  </div>
+                </div>
+              </teleport>
+
+              <Modal
+                :model-value="showDeleteConfirm"
+                title="Видалити рецепт?"
+                cancel-text="Скасувати"
+                confirm-text="Видалити"
+                @cancel="showDeleteConfirm = false"
+                @confirm="deleteRecipe"
+              />
+            </div>
+          </template>
+
+          <script setup lang="ts">
+          import RecipeGrid from '~/components/RecipeGrid.vue'
+          import Modal from '~/components/Modal.vue'
+
+          definePageMeta({ middleware: 'auth' })
+
+          const router = useRouter()
+          const client = useSupabaseClient()
+          const user = useSupabaseUser()
+          const { addToast } = useToasts()
+
+          const recipes = ref<any[]>([])
+          const loaded = ref(false)
+
+          const showActions = ref(false)
+          const selectedRecipe = ref<any | null>(null)
+
+          const showDeleteConfirm = ref(false)
+
+          const load = async () => {
+            if (!user.value) return
+            const { data, error } = await client
+              .from('recipes')
+              .select('*')
+              .eq('author_id', user.value.id)
+              .order('created_at', { ascending: false })
+
+            if (error) {
+              addToast('Сталася помилка. Спробуйте ще раз')
+              return
+            }
+            recipes.value = data || []
+            loaded.value = true
+          }
+
+          onMounted(load)
+
+          const openActionMenu = (recipe: any) => {
+            selectedRecipe.value = recipe
+            showActions.value = true
+          }
+
+          const closeActions = () => {
+            showActions.value = false
+            selectedRecipe.value = null
+          }
+
+          const goEdit = () => {
+            if (!selectedRecipe.value) return
+            const id = selectedRecipe.value.id
+            closeActions()
+            router.push(`/recipes/${id}/edit`)
+          }
+
+          const toggleStatus = async () => {
+            if (!selectedRecipe.value) return
+            const r = selectedRecipe.value
+            const next = !r.is_public
+            const { error } = await client
+              .from('recipes')
+              .update({ is_public: next })
+              .eq('id', r.id)
+
+            if (error) {
+              addToast('Недостатньо прав для виконання дії')
+              return
+            }
+            addToast('Статус рецепта змінено')
+            closeActions()
+            await load()
+          }
+
+          const openDeleteConfirm = () => {
+            showDeleteConfirm.value = true
+          }
+
+          const deleteRecipe = async () => {
+            if (!selectedRecipe.value) return
+            const { error } = await client.from('recipes').delete().eq('id', selectedRecipe.value.id)
+            showDeleteConfirm.value = false
+            closeActions()
+
+            if (error) {
+              addToast('Недостатньо прав для виконання дії')
+              return
+            }
+            addToast('Рецепт видалено')
+            await load()
+          }
+          </script>
+          EOF
+
+          # ----------------------------
+          # pages/my/saved.vue
+          # ----------------------------
+          cat > pages/my/saved.vue <<'EOF'
+          <template>
+            <div class="space-y-6">
+              <h1 class="text-2xl font-semibold">Збережені рецепти</h1>
+
+              <p v-if="loaded && recipes.length === 0" class="text-sm text-gray-600">
+                Ви ще не зберегли жодного рецепта.
+              </p>
+
+              <RecipeGrid
+                v-else
+                :recipes="recipes"
+                @toggleSave="toggleSave"
+                @saveAsGuest="openGuestModal"
+              />
+
+              <Modal
+                :model-value="showGuestModal"
+                title="Увійдіть, щоб зберігати рецепти"
+                message="Збережені рецепти будуть доступні у вашому профілі."
+                cancel-text="Закрити"
+                confirm-text="Увійти"
+                @cancel="showGuestModal = false"
+                @confirm="goAuth"
+              />
+            </div>
+          </template>
+
+          <script setup lang="ts">
+          import RecipeGrid from '~/components/RecipeGrid.vue'
+          import Modal from '~/components/Modal.vue'
+
+          definePageMeta({ middleware: 'auth' })
+
+          const router = useRouter()
+          const client = useSupabaseClient()
+          const user = useSupabaseUser()
+          const { addToast } = useToasts()
+
+          const recipes = ref<any[]>([])
+          const loaded = ref(false)
+          const showGuestModal = ref(false)
+
+          const load = async () => {
+            if (!user.value) return
+            const { data, error } = await client
+              .from('saved_recipes')
+              .select('recipe_id, recipes(*)')
+              .eq('user_id', user.value.id)
+              .order('created_at', { ascending: false })
+
+            if (error) {
+              addToast('Сталася помилка. Спробуйте ще раз')
+              return
+            }
+
+            recipes.value = (data || [])
+              .map((row: any) => row.recipes)
+              .filter(Boolean)
+
+            loaded.value = true
+          }
+
+          onMounted(load)
+
+          const openGuestModal = () => {
+            showGuestModal.value = true
+          }
+
+          const goAuth = () => {
+            showGuestModal.value = false
+            router.push('/auth')
+          }
+
+          const toggleSave = async (recipe: any) => {
+            if (!user.value) return
+            const { error } = await client
+              .from('saved_recipes')
+              .delete()
+              .eq('user_id', user.value.id)
+              .eq('recipe_id', recipe.id)
+
+            if (error) {
+              addToast('Недостатньо прав для виконання дії')
+              return
+            }
+            addToast('Рецепт видалено із збережених')
+            await load()
+          }
+          </script>
+          EOF
+
+          # ----------------------------
+          # pages/recipes/create.vue
+          # ----------------------------
+          cat > pages/recipes/create.vue <<'EOF'
+          <template>
+            <div class="max-w-4xl mx-auto space-y-6">
+              <h1 class="text-2xl font-semibold">Створення рецепта</h1>
+
+              <form class="space-y-6" @submit.prevent="onSubmit">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <!-- LEFT -->
+                  <div class="space-y-4">
+                    <div class="space-y-1">
+                      <label class="text-sm font-medium">Назва</label>
+                      <input
+                        v-model="form.title"
+                        type="text"
+                        class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                        placeholder="Наприклад: Борщ"
+                      />
+                      <p v-if="errors.title" class="text-xs text-red-600">{{ errors.title }}</p>
+                    </div>
+
+                    <div class="space-y-1">
+                      <label class="text-sm font-medium">Опис</label>
+                      <textarea
+                        v-model="form.description"
+                        rows="4"
+                        class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                        placeholder="Коротка історія або опис рецепта"
+                      />
+                      <p v-if="errors.description" class="text-xs text-red-600">{{ errors.description }}</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div class="space-y-1">
+                        <label class="text-sm font-medium">Час (хв)</label>
+                        <input
+                          v-model.number="form.cook_time_minutes"
+                          type="number"
+                          min="1"
+                          class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                        />
+                      </div>
+
+                      <div class="space-y-1">
+                        <label class="text-sm font-medium">Порції (базові)</label>
+                        <input
+                          v-model.number="form.servings"
+                          type="number"
+                          min="1"
+                          max="50"
+                          class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                        />
+                        <p v-if="errors.servings" class="text-xs text-red-600">{{ errors.servings }}</p>
+                      </div>
+                    </div>
+
+                    <div class="space-y-1">
+                      <label class="text-sm font-medium">Сезон</label>
+                      <select
+                        v-model="form.season"
+                        class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                      >
+                        <option value="winter">winter</option>
+                        <option value="spring">spring</option>
+                        <option value="summer">summer</option>
+                        <option value="autumn">autumn</option>
+                      </select>
+                      <p v-if="errors.season" class="text-xs text-red-600">{{ errors.season }}</p>
+                    </div>
+
+                    <div class="flex items-center gap-2">
+                      <input id="public" v-model="form.is_public" type="checkbox" class="h-4 w-4" />
+                      <label for="public" class="text-sm">Публічний рецепт</label>
+                    </div>
+                  </div>
+
+                  <!-- RIGHT -->
+                  <div class="space-y-6">
+                    <!-- Ingredients -->
+                    <div class="border rounded-2xl p-4 space-y-3">
+                      <div class="flex items-center justify-between">
+                        <h2 class="font-semibold">Інгредієнти</h2>
+                        <button
+                          type="button"
+                          class="text-sm border border-gray-300 rounded-full px-3 py-1.5 hover:bg-gray-50"
+                          @click="addIngredient"
+                        >
+                          Додати
+                        </button>
+                      </div>
+
+                      <p v-if="errors.ingredients" class="text-xs text-red-600">{{ errors.ingredients }}</p>
+
+                      <div v-for="(ing, idx) in form.ingredients" :key="ing._key" class="grid grid-cols-12 gap-2 items-start">
+                        <div class="col-span-12 sm:col-span-6">
+                          <input
+                            v-model="ing.name"
+                            type="text"
+                            class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm"
+                            placeholder="Назва"
+                          />
+                        </div>
+
+                        <div class="col-span-6 sm:col-span-3">
+                          <input
+                            v-model.number="ing.quantity"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm"
+                            placeholder="К-сть"
+                          />
+                        </div>
+
+                        <div class="col-span-5 sm:col-span-2">
+                          <input
+                            v-model="ing.unit"
+                            type="text"
+                            class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm"
+                            placeholder="Одиниця"
+                          />
+                        </div>
+
+                        <div class="col-span-1 flex justify-end">
+                          <button
+                            type="button"
+                            class="text-gray-500 hover:text-gray-900"
+                            @click="removeIngredient(idx)"
+                            aria-label="Remove ingredient"
+                          >
+                            ✕
+                          </button>
+                        </div>
+
+                        <div class="col-span-12">
+                          <p v-if="ingredientErrors[idx]" class="text-xs text-red-600">
+                            {{ ingredientErrors[idx] }}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Steps -->
+                    <div class="border rounded-2xl p-4 space-y-3">
+                      <div class="flex items-center justify-between">
+                        <h2 class="font-semibold">Кроки</h2>
+                        <button
+                          type="button"
+                          class="text-sm border border-gray-300 rounded-full px-3 py-1.5 hover:bg-gray-50"
+                          @click="addStep"
+                        >
+                          Додати
+                        </button>
+                      </div>
+
+                      <p v-if="errors.steps" class="text-xs text-red-600">{{ errors.steps }}</p>
+
+                      <div v-for="(st, idx) in form.steps" :key="st._key" class="space-y-2">
+                        <div class="flex items-center justify-between">
+                          <div class="text-sm font-medium text-gray-700">Крок {{ idx + 1 }}</div>
+                          <button
+                            type="button"
+                            class="text-gray-500 hover:text-gray-900 text-sm"
+                            @click="removeStep(idx)"
+                          >
+                            ✕
+                          </button>
+                        </div>
+
+                        <textarea
+                          v-model="st.text"
+                          rows="3"
+                          class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm"
+                          placeholder="Опис кроку"
+                        />
+
+                        <p v-if="stepErrors[idx]" class="text-xs text-red-600">
+                          {{ stepErrors[idx] }}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div v-if="formError" class="border rounded-xl px-4 py-3 text-sm bg-gray-50 text-gray-800">
+                  {{ formError }}
+                </div>
+
+                <div class="flex justify-end">
+                  <button
+                    type="submit"
+                    class="rounded-full bg-primary text-white px-6 py-2 text-sm hover:bg-orange-500 transition"
+                    :disabled="loading"
+                  >
+                    {{ loading ? 'Збереження…' : 'Опублікувати' }}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </template>
+
+          <script setup lang="ts">
+          definePageMeta({ middleware: 'auth' })
+
+          const router = useRouter()
+          const client = useSupabaseClient()
+          const user = useSupabaseUser()
+          const { addToast } = useToasts()
+
+          const loading = ref(false)
+          const formError = ref('')
+
+          const form = reactive({
+            title: '',
+            description: '',
+            main_image_url: '',
+            cook_time_minutes: null as number | null,
+            servings: 2,
+            season: 'winter',
+            is_public: true,
+            ingredients: [] as any[],
+            steps: [] as any[]
+          })
+
+          const errors = reactive<{ [k: string]: string | undefined }>({})
+          const ingredientErrors = ref<string[]>([])
+          const stepErrors = ref<string[]>([])
+
+          const makeKey = () => `${Date.now()}-${Math.random()}`
+
+          const addIngredient = () => {
+            form.ingredients.push({ _key: makeKey(), name: '', quantity: 0, unit: '' })
+          }
+          const removeIngredient = (idx: number) => {
+            form.ingredients.splice(idx, 1)
+          }
+
+          const addStep = () => {
+            form.steps.push({ _key: makeKey(), text: '', image_url: '' })
+          }
+          const removeStep = (idx: number) => {
+            form.steps.splice(idx, 1)
+          }
+
+          onMounted(() => {
+            // Start with one ingredient and one step
+            addIngredient()
+            addStep()
+          })
+
+          const validate = () => {
+            for (const k of Object.keys(errors)) errors[k] = undefined
+            ingredientErrors.value = []
+            stepErrors.value = []
+            formError.value = ''
+
+            const t = form.title.trim()
+            if (!t) errors.title = 'Вкажіть назву рецепта'
+            else if (t.length < 3) errors.title = 'Назва має містити щонайменше 3 символи'
+            else if (t.length > 100) errors.title = 'Назва має бути не довше 100 символів'
+
+            if (!form.servings || form.servings < 1 || form.servings > 50) {
+              errors.servings = 'Кількість порцій має бути числом від 1 до 50'
+            }
+
+            if (!form.season) errors.season = 'Оберіть сезон'
+
+            if (!form.ingredients.length) {
+              errors.ingredients = 'Додайте щонайменше один інгредієнт'
+            } else {
+              form.ingredients.forEach((ing, idx) => {
+                const nameOk = (ing.name || '').trim().length >= 2
+                const qtyOk = typeof ing.quantity === 'number' && ing.quantity > 0
+                const unitOk = (ing.unit || '').trim().length >= 1
+                let msg = ''
+                if (!nameOk) msg = 'Заповніть назву інгредієнта'
+                else if (!qtyOk) msg = 'Кількість інгредієнта має бути більшою за 0'
+                else if (!unitOk) msg = 'Одиниця виміру обов’язкова'
+                ingredientErrors.value[idx] = msg
+              })
+            }
+
+            if (!form.steps.length) {
+              errors.steps = 'Додайте щонайменше один крок приготування'
+            } else {
+              form.steps.forEach((st, idx) => {
+                const ok = (st.text || '').trim().length >= 5
+                stepErrors.value[idx] = ok ? '' : 'Опис кроку має містити щонайменше 5 символів'
+              })
+            }
+
+            const ingredientOk = ingredientErrors.value.every(x => !x)
+            const stepsOk = stepErrors.value.every(x => !x)
+
+            return !errors.title && !errors.servings && !errors.season && !errors.ingredients && !errors.steps && ingredientOk && stepsOk
+          }
+
+          const onSubmit = async () => {
+            if (!user.value) return
+            if (!validate()) return
+
+            loading.value = true
+            try {
+              const { data: recipe, error: recipeErr } = await client
+                .from('recipes')
+                .insert({
+                  author_id: user.value.id,
+                  title: form.title.trim(),
+                  description: form.description.trim(),
+                  main_image_url: form.main_image_url || null,
+                  cook_time_minutes: form.cook_time_minutes,
+                  servings: form.servings,
+                  season: form.season,
+                  is_public: form.is_public
+                })
+                .select('*')
+                .single()
+
+              if (recipeErr) throw recipeErr
+
+              // ingredients
+              const ingredientsPayload = form.ingredients.map((ing, idx) => ({
+                recipe_id: recipe.id,
+                name: (ing.name || '').trim(),
+                quantity: ing.quantity,
+                unit: (ing.unit || '').trim(),
+                order_index: idx + 1
+              }))
+
+              const { error: ingErr } = await client.from('recipe_ingredients').insert(ingredientsPayload)
+              if (ingErr) throw ingErr
+
+              // steps
+              const stepsPayload = form.steps.map((st, idx) => ({
+                recipe_id: recipe.id,
+                step_number: idx + 1,
+                text: (st.text || '').trim(),
+                image_url: st.image_url || null
+              }))
+
+              const { error: stErr } = await client.from('recipe_steps').insert(stepsPayload)
+              if (stErr) throw stErr
+
+              addToast('Рецепт успішно збережено')
+              router.push(`/recipes/${recipe.id}`)
+            } catch (e: any) {
+              formError.value = 'Сталася помилка. Спробуйте ще раз'
+            } finally {
+              loading.value = false
+            }
+          }
+          </script>
+          EOF
+
+          # ----------------------------
+          # pages/recipes/[id].vue
+          # ----------------------------
+          cat > pages/recipes/[id].vue <<'EOF'
+          <template>
+            <div v-if="loading" class="text-sm text-gray-600">Завантаження…</div>
+
+            <div v-else-if="!recipe" class="text-sm text-gray-600">
+              Рецепт не знайдено.
+            </div>
+
+            <div v-else class="space-y-6">
+              <div class="flex items-start justify-between gap-4">
+                <div>
+                  <h1 class="text-2xl font-semibold">{{ recipe.title }}</h1>
+                  <div class="text-sm text-gray-600 mt-1">
+                    <span v-if="recipe.cook_time_minutes">Час: {{ recipe.cook_time_minutes }} хв</span>
+                    <span v-if="recipe.cook_time_minutes"> · </span>
+                    <span>Базові порції: {{ recipe.servings }}</span>
+                  </div>
+                </div>
+
+                <div class="flex items-center gap-2">
+                  <!-- non-author save -->
+                  <button
+                    v-if="user && !isAuthor"
+                    type="button"
+                    class="text-sm border border-gray-300 rounded-full px-4 py-2 hover:bg-gray-50"
+                    @click="toggleSave"
+                  >
+                    {{ isSaved ? 'Збережено' : 'Зберегти' }}
+                  </button>
+
+                  <!-- guest save -->
+                  <button
+                    v-if="!user"
+                    type="button"
+                    class="text-sm border border-gray-300 rounded-full px-4 py-2 hover:bg-gray-50"
+                    @click="showGuestModal = true"
+                  >
+                    Зберегти
+                  </button>
+
+                  <!-- author actions -->
+                  <button
+                    v-if="user && isAuthor"
+                    type="button"
+                    class="text-xl leading-none px-2 py-1 text-gray-500 hover:text-gray-900"
+                    @click="showActions = true"
+                    aria-label="Recipe actions"
+                  >
+                    ⋮
+                  </button>
+                </div>
+              </div>
+
+              <!-- Desktop layout: two columns (lg+) -->
+              <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <!-- LEFT: image + servings + ingredients -->
+                <div class="space-y-4">
+                  <div class="rounded-2xl overflow-hidden bg-gray-100 aspect-[4/3]">
+                    <img
+                      v-if="recipe.main_image_url"
+                      :src="recipe.main_image_url"
+                      :alt="recipe.title"
+                      class="w-full h-full object-cover"
+                    />
+                  </div>
+
+                  <ServingsControl
+                    :current-servings="currentServings"
+                    @update:servings="currentServings = $event"
+                  />
+
+                  <div class="space-y-2">
+                    <h2 class="font-semibold">Інгредієнти</h2>
+                    <IngredientList
+                      :ingredients="ingredients"
+                      :base-servings="recipe.servings"
+                      :current-servings="currentServings"
+                    />
+                  </div>
+                </div>
+
+                <!-- RIGHT: description + steps -->
+                <div class="space-y-6">
+                  <div v-if="recipe.description" class="space-y-2">
+                    <h2 class="font-semibold">Опис</h2>
+                    <p class="text-sm text-gray-800 whitespace-pre-line">
+                      {{ recipe.description }}
+                    </p>
+                  </div>
+
+                  <div class="space-y-2">
+                    <h2 class="font-semibold">Кроки</h2>
+                    <StepsList :steps="steps" />
+                  </div>
+                </div>
+              </div>
+
+              <!-- Guest modal (Point 4A-1) -->
+              <Modal
+                :model-value="showGuestModal"
+                title="Увійдіть, щоб зберігати рецепти"
+                message="Збережені рецепти будуть доступні у вашому профілі."
+                cancel-text="Закрити"
+                confirm-text="Увійти"
+                @cancel="showGuestModal = false"
+                @confirm="goAuth"
+              />
+
+              <!-- Author actions modal -->
+              <teleport to="body">
+                <div v-if="showActions" class="fixed inset-0 z-40 bg-black/40 flex items-center justify-center">
+                  <div class="bg-white rounded-2xl shadow-lg w-full max-w-sm mx-4 p-5 space-y-3">
+                    <div class="font-semibold">
+                      Дії з рецептом
+                    </div>
+
+                    <button
+                      type="button"
+                      class="w-full text-left px-4 py-2 rounded-xl border border-gray-300 hover:bg-gray-50 text-sm"
+                      @click="goEdit"
+                    >
+                      Редагувати
+                    </button>
+
+                    <button
+                      type="button"
+                      class="w-full text-left px-4 py-2 rounded-xl border border-gray-300 hover:bg-gray-50 text-sm"
+                      @click="toggleStatus"
+                    >
+                      Змінити статус (публічний/приватний)
+                    </button>
+
+                    <button
+                      type="button"
+                      class="w-full text-left px-4 py-2 rounded-xl border border-gray-300 hover:bg-gray-50 text-sm"
+                      @click="showDeleteConfirm = true"
+                    >
+                      Видалити
+                    </button>
+
+                    <button
+                      type="button"
+                      class="w-full px-4 py-2 rounded-xl border border-gray-300 hover:bg-gray-50 text-sm"
+                      @click="showActions = false"
+                    >
+                      Закрити
+                    </button>
+                  </div>
+                </div>
+              </teleport>
+
+              <Modal
+                :model-value="showDeleteConfirm"
+                title="Видалити рецепт?"
+                cancel-text="Скасувати"
+                confirm-text="Видалити"
+                @cancel="showDeleteConfirm = false"
+                @confirm="deleteRecipe"
+              />
+            </div>
+          </template>
+
+          <script setup lang="ts">
+          import Modal from '~/components/Modal.vue'
+          import ServingsControl from '~/components/ServingsControl.vue'
+          import IngredientList from '~/components/IngredientList.vue'
+          import StepsList from '~/components/StepsList.vue'
+
+          const route = useRoute()
+          const router = useRouter()
+          const client = useSupabaseClient()
+          const user = useSupabaseUser()
+          const { addToast } = useToasts()
+
+          const id = computed(() => route.params.id as string)
+
+          const loading = ref(true)
+          const recipe = ref<any | null>(null)
+          const ingredients = ref<any[]>([])
+          const steps = ref<any[]>([])
+
+          const currentServings = ref<number>(1)
+
+          const showGuestModal = ref(false)
+          const showActions = ref(false)
+          const showDeleteConfirm = ref(false)
+
+          const isAuthor = computed(() => user.value && recipe.value && user.value.id === recipe.value.author_id)
+          const isSaved = ref(false)
+
+          const load = async () => {
+            loading.value = true
+            try {
+              const { data, error } = await client
+                .from('recipes')
+                .select('*, recipe_ingredients(*), recipe_steps(*)')
+                .eq('id', id.value)
+                .maybeSingle()
+
+              if (error) throw error
+              recipe.value = data || null
+              ingredients.value = (data?.recipe_ingredients || []).sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0))
+              steps.value = (data?.recipe_steps || []).sort((a: any, b: any) => (a.step_number ?? 0) - (b.step_number ?? 0))
+              currentServings.value = data?.servings || 1
+
+              // check saved state for authorized non-author user
+              if (user.value && data && user.value.id !== data.author_id) {
+                const { data: saved, error: sErr } = await client
+                  .from('saved_recipes')
+                  .select('recipe_id')
+                  .eq('user_id', user.value.id)
+                  .eq('recipe_id', data.id)
+                  .maybeSingle()
+                if (!sErr) isSaved.value = !!saved
+              }
+            } catch {
+              recipe.value = null
+            } finally {
+              loading.value = false
+            }
+          }
+
+          onMounted(load)
+
+          watch(user, async () => {
+            // re-check saved status when user changes
+            await load()
+          })
+
+          const goAuth = () => {
+            showGuestModal.value = false
+            router.push('/auth')
+          }
+
+          const toggleSave = async () => {
+            if (!user.value || !recipe.value) return
+            if (isSaved.value) {
+              const { error } = await client
+                .from('saved_recipes')
+                .delete()
+                .eq('user_id', user.value.id)
+                .eq('recipe_id', recipe.value.id)
+              if (error) {
+                addToast('Недостатньо прав для виконання дії')
+                return
+              }
+              isSaved.value = false
+              addToast('Рецепт видалено із збережених')
+            } else {
+              const { error } = await client
+                .from('saved_recipes')
+                .insert({ user_id: user.value.id, recipe_id: recipe.value.id })
+              if (error) {
+                addToast('Сталася помилка. Спробуйте ще раз')
+                return
+              }
+              isSaved.value = true
+              addToast('Рецепт збережено')
+            }
+          }
+
+          const goEdit = () => {
+            if (!recipe.value) return
+            showActions.value = false
+            router.push(`/recipes/${recipe.value.id}/edit`)
+          }
+
+          const toggleStatus = async () => {
+            if (!recipe.value) return
+            const next = !recipe.value.is_public
+            const { error } = await client.from('recipes').update({ is_public: next }).eq('id', recipe.value.id)
+            if (error) {
+              addToast('Недостатньо прав для виконання дії')
+              return
+            }
+            addToast('Статус рецепта змінено')
+            showActions.value = false
+            await load()
+          }
+
+          const deleteRecipe = async () => {
+            if (!recipe.value) return
+            const { error } = await client.from('recipes').delete().eq('id', recipe.value.id)
+            showDeleteConfirm.value = false
+            showActions.value = false
+            if (error) {
+              addToast('Недостатньо прав для виконання дії')
+              return
+            }
+            addToast('Рецепт видалено')
+            router.push('/my/recipes')
+          }
+          </script>
+          EOF
+
+          # ----------------------------
+          # pages/recipes/[id]/edit.vue
+          # ----------------------------
+          cat > pages/recipes/[id]/edit.vue <<'EOF'
+          <template>
+            <div v-if="loading" class="text-sm text-gray-600">Завантаження…</div>
+
+            <div v-else-if="!recipe" class="text-sm text-gray-600">
+              Рецепт не знайдено.
+            </div>
+
+            <div v-else class="max-w-4xl mx-auto space-y-6">
+              <h1 class="text-2xl font-semibold">Редагування рецепта</h1>
+
+              <form class="space-y-6" @submit.prevent="onSubmit">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <!-- LEFT -->
+                  <div class="space-y-4">
+                    <div class="space-y-1">
+                      <label class="text-sm font-medium">Назва</label>
+                      <input
+                        v-model="form.title"
+                        type="text"
+                        class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                      />
+                      <p v-if="errors.title" class="text-xs text-red-600">{{ errors.title }}</p>
+                    </div>
+
+                    <div class="space-y-1">
+                      <label class="text-sm font-medium">Опис</label>
+                      <textarea
+                        v-model="form.description"
+                        rows="4"
+                        class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                      />
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div class="space-y-1">
+                        <label class="text-sm font-medium">Час (хв)</label>
+                        <input
+                          v-model.number="form.cook_time_minutes"
+                          type="number"
+                          min="1"
+                          class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                        />
+                      </div>
+
+                      <div class="space-y-1">
+                        <label class="text-sm font-medium">Порції (базові)</label>
+                        <input
+                          v-model.number="form.servings"
+                          type="number"
+                          min="1"
+                          max="50"
+                          class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                        />
+                        <p v-if="errors.servings" class="text-xs text-red-600">{{ errors.servings }}</p>
+                      </div>
+                    </div>
+
+                    <div class="space-y-1">
+                      <label class="text-sm font-medium">Сезон</label>
+                      <select
+                        v-model="form.season"
+                        class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                      >
+                        <option value="winter">winter</option>
+                        <option value="spring">spring</option>
+                        <option value="summer">summer</option>
+                        <option value="autumn">autumn</option>
+                      </select>
+                      <p v-if="errors.season" class="text-xs text-red-600">{{ errors.season }}</p>
+                    </div>
+
+                    <div class="flex items-center gap-2">
+                      <input id="public" v-model="form.is_public" type="checkbox" class="h-4 w-4" />
+                      <label for="public" class="text-sm">Публічний рецепт</label>
+                    </div>
+                  </div>
+
+                  <!-- RIGHT -->
+                  <div class="space-y-6">
+                    <div class="border rounded-2xl p-4 space-y-3">
+                      <div class="flex items-center justify-between">
+                        <h2 class="font-semibold">Інгредієнти</h2>
+                        <button
+                          type="button"
+                          class="text-sm border border-gray-300 rounded-full px-3 py-1.5 hover:bg-gray-50"
+                          @click="addIngredient"
+                        >
+                          Додати
+                        </button>
+                      </div>
+
+                      <p v-if="errors.ingredients" class="text-xs text-red-600">{{ errors.ingredients }}</p>
+
+                      <div v-for="(ing, idx) in form.ingredients" :key="ing._key" class="grid grid-cols-12 gap-2 items-start">
+                        <div class="col-span-12 sm:col-span-6">
+                          <input v-model="ing.name" type="text" class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm" placeholder="Назва" />
+                        </div>
+                        <div class="col-span-6 sm:col-span-3">
+                          <input v-model.number="ing.quantity" type="number" min="0" step="0.01" class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm" placeholder="К-сть" />
+                        </div>
+                        <div class="col-span-5 sm:col-span-2">
+                          <input v-model="ing.unit" type="text" class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm" placeholder="Одиниця" />
+                        </div>
+                        <div class="col-span-1 flex justify-end">
+                          <button type="button" class="text-gray-500 hover:text-gray-900" @click="removeIngredient(idx)">✕</button>
+                        </div>
+                        <div class="col-span-12">
+                          <p v-if="ingredientErrors[idx]" class="text-xs text-red-600">{{ ingredientErrors[idx] }}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="border rounded-2xl p-4 space-y-3">
+                      <div class="flex items-center justify-between">
+                        <h2 class="font-semibold">Кроки</h2>
+                        <button
+                          type="button"
+                          class="text-sm border border-gray-300 rounded-full px-3 py-1.5 hover:bg-gray-50"
+                          @click="addStep"
+                        >
+                          Додати
+                        </button>
+                      </div>
+
+                      <p v-if="errors.steps" class="text-xs text-red-600">{{ errors.steps }}</p>
+
+                      <div v-for="(st, idx) in form.steps" :key="st._key" class="space-y-2">
+                        <div class="flex items-center justify-between">
+                          <div class="text-sm font-medium text-gray-700">Крок {{ idx + 1 }}</div>
+                          <button type="button" class="text-gray-500 hover:text-gray-900 text-sm" @click="removeStep(idx)">✕</button>
+                        </div>
+                        <textarea v-model="st.text" rows="3" class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm" placeholder="Опис кроку" />
+                        <p v-if="stepErrors[idx]" class="text-xs text-red-600">{{ stepErrors[idx] }}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div v-if="formError" class="border rounded-xl px-4 py-3 text-sm bg-gray-50 text-gray-800">
+                  {{ formError }}
+                </div>
+
+                <div class="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    class="rounded-full border border-gray-300 px-6 py-2 text-sm hover:bg-gray-50"
+                    @click="router.push(`/recipes/${id}`)"
+                  >
+                    Скасувати
+                  </button>
+                  <button
+                    type="submit"
+                    class="rounded-full bg-primary text-white px-6 py-2 text-sm hover:bg-orange-500 transition"
+                    :disabled="saving"
+                  >
+                    {{ saving ? 'Збереження…' : 'Зберегти' }}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </template>
+
+          <script setup lang="ts">
+          definePageMeta({ middleware: 'auth' })
+
+          const route = useRoute()
+          const router = useRouter()
+          const client = useSupabaseClient()
+          const user = useSupabaseUser()
+          const { addToast } = useToasts()
+
+          const id = route.params.id as string
+
+          const loading = ref(true)
+          const saving = ref(false)
+          const recipe = ref<any | null>(null)
+
+          const formError = ref('')
+
+          const form = reactive({
+            title: '',
+            description: '',
+            cook_time_minutes: null as number | null,
+            servings: 2,
+            season: 'winter',
+            is_public: true,
+            ingredients: [] as any[],
+            steps: [] as any[]
+          })
+
+          const errors = reactive<{ [k: string]: string | undefined }>({})
+          const ingredientErrors = ref<string[]>([])
+          const stepErrors = ref<string[]>([])
+
+          const makeKey = () => `${Date.now()}-${Math.random()}`
+
+          const addIngredient = () => {
+            form.ingredients.push({ _key: makeKey(), name: '', quantity: 0, unit: '' })
+          }
+          const removeIngredient = (idx: number) => {
+            form.ingredients.splice(idx, 1)
+          }
+
+          const addStep = () => {
+            form.steps.push({ _key: makeKey(), text: '', image_url: '' })
+          }
+          const removeStep = (idx: number) => {
+            form.steps.splice(idx, 1)
+          }
+
+          const validate = () => {
+            for (const k of Object.keys(errors)) errors[k] = undefined
+            ingredientErrors.value = []
+            stepErrors.value = []
+            formError.value = ''
+
+            const t = form.title.trim()
+            if (!t) errors.title = 'Вкажіть назву рецепта'
+            else if (t.length < 3) errors.title = 'Назва має містити щонайменше 3 символи'
+            else if (t.length > 100) errors.title = 'Назва має бути не довше 100 символів'
+
+            if (!form.servings || form.servings < 1 || form.servings > 50) {
+              errors.servings = 'Кількість порцій має бути числом від 1 до 50'
+            }
+
+            if (!form.season) errors.season = 'Оберіть сезон'
+
+            if (!form.ingredients.length) {
+              errors.ingredients = 'Додайте щонайменше один інгредієнт'
+            } else {
+              form.ingredients.forEach((ing, idx) => {
+                const nameOk = (ing.name || '').trim().length >= 2
+                const qtyOk = typeof ing.quantity === 'number' && ing.quantity > 0
+                const unitOk = (ing.unit || '').trim().length >= 1
+                let msg = ''
+                if (!nameOk) msg = 'Заповніть назву інгредієнта'
+                else if (!qtyOk) msg = 'Кількість інгредієнта має бути більшою за 0'
+                else if (!unitOk) msg = 'Одиниця виміру обов’язкова'
+                ingredientErrors.value[idx] = msg
+              })
+            }
+
+            if (!form.steps.length) {
+              errors.steps = 'Додайте щонайменше один крок приготування'
+            } else {
+              form.steps.forEach((st, idx) => {
+                const ok = (st.text || '').trim().length >= 5
+                stepErrors.value[idx] = ok ? '' : 'Опис кроку має містити щонайменше 5 символів'
+              })
+            }
+
+            const ingredientOk = ingredientErrors.value.every(x => !x)
+            const stepsOk = stepErrors.value.every(x => !x)
+
+            return !errors.title && !errors.servings && !errors.season && !errors.ingredients && !errors.steps && ingredientOk && stepsOk
+          }
+
+          const load = async () => {
+            loading.value = true
+            try {
+              const { data, error } = await client
+                .from('recipes')
+                .select('*, recipe_ingredients(*), recipe_steps(*)')
+                .eq('id', id)
+                .maybeSingle()
+
+              if (error) throw error
+              if (!data) {
+                recipe.value = null
+                return
+              }
+
+              // ownership check
+              if (!user.value || data.author_id !== user.value.id) {
+                addToast('Недостатньо прав для виконання дії')
+                router.push(`/recipes/${id}`)
+                return
+              }
+
+              recipe.value = data
+              form.title = data.title || ''
+              form.description = data.description || ''
+              form.cook_time_minutes = data.cook_time_minutes ?? null
+              form.servings = data.servings || 1
+              form.season = data.season || 'winter'
+              form.is_public = !!data.is_public
+
+              const ings = (data.recipe_ingredients || []).sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0))
+              const sts = (data.recipe_steps || []).sort((a: any, b: any) => (a.step_number ?? 0) - (b.step_number ?? 0))
+
+              form.ingredients = ings.map((x: any) => ({ _key: makeKey(), name: x.name, quantity: Number(x.quantity), unit: x.unit || '' }))
+              form.steps = sts.map((x: any) => ({ _key: makeKey(), text: x.text, image_url: x.image_url || '' }))
+
+              if (!form.ingredients.length) addIngredient()
+              if (!form.steps.length) addStep()
+            } catch {
+              recipe.value = null
+            } finally {
+              loading.value = false
+            }
+          }
+
+          onMounted(load)
+
+          const onSubmit = async () => {
+            if (!user.value) return
+            if (!validate()) return
+
+            saving.value = true
+            try {
+              const { error: upErr } = await client
+                .from('recipes')
+                .update({
+                  title: form.title.trim(),
+                  description: form.description.trim(),
+                  cook_time_minutes: form.cook_time_minutes,
+                  servings: form.servings,
+                  season: form.season,
+                  is_public: form.is_public
+                })
+                .eq('id', id)
+
+              if (upErr) throw upErr
+
+              // simplest approach: replace ingredients & steps
+              const { error: delIng } = await client.from('recipe_ingredients').delete().eq('recipe_id', id)
+              if (delIng) throw delIng
+              const { error: delSteps } = await client.from('recipe_steps').delete().eq('recipe_id', id)
+              if (delSteps) throw delSteps
+
+              const ingredientsPayload = form.ingredients.map((ing, idx) => ({
+                recipe_id: id,
+                name: (ing.name || '').trim(),
+                quantity: ing.quantity,
+                unit: (ing.unit || '').trim(),
+                order_index: idx + 1
+              }))
+              const { error: ingErr } = await client.from('recipe_ingredients').insert(ingredientsPayload)
+              if (ingErr) throw ingErr
+
+              const stepsPayload = form.steps.map((st, idx) => ({
+                recipe_id: id,
+                step_number: idx + 1,
+                text: (st.text || '').trim(),
+                image_url: st.image_url || null
+              }))
+              const { error: stErr } = await client.from('recipe_steps').insert(stepsPayload)
+              if (stErr) throw stErr
+
+              addToast('Рецепт успішно збережено')
+              router.push(`/recipes/${id}`)
+            } catch {
+              formError.value = 'Сталася помилка. Спробуйте ще раз'
+            } finally {
+              saving.value = false
+            }
+          }
+          </script>
+          EOF
+
+          # git status + commit
+          git status --porcelain
+          git add .
+          git commit -m "TASK001: add missing pages (auth/profile/my/recipes/my/saved/recipes create-view-edit) + auth middleware" || echo "No changes to commit"
+          git push
+      - name: Done
+        run: echo "TASK001 applied."
