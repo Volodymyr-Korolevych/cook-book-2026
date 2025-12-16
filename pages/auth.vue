@@ -2,7 +2,10 @@
   <div class="max-w-lg mx-auto space-y-6">
     <h1 class="text-2xl font-semibold">Вхід / Реєстрація</h1>
 
-    <div v-if="authMessage" class="border rounded-xl px-4 py-3 text-sm bg-gray-50 text-gray-800">
+    <div
+      v-if="authMessage"
+      class="border rounded-xl px-4 py-3 text-sm bg-gray-50 text-gray-800"
+    >
       {{ authMessage }}
     </div>
 
@@ -28,35 +31,52 @@
     <form class="space-y-4" @submit.prevent="onSubmit">
       <div v-if="mode === 'register'" class="space-y-1">
         <label class="text-sm font-medium">Ім’я</label>
-        <input v-model="displayName" type="text"
+        <input
+          v-model="displayName"
+          type="text"
           class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-          placeholder="Ваше ім’я" />
-        <p v-if="errors.displayName" class="text-xs text-red-600">{{ errors.displayName }}</p>
+          placeholder="Ваше ім’я"
+        />
+        <p v-if="errors.displayName" class="text-xs text-red-600">
+          {{ errors.displayName }}
+        </p>
       </div>
 
       <div class="space-y-1">
         <label class="text-sm font-medium">Email</label>
-        <input v-model="email" type="email"
+        <input
+          v-model="email"
+          type="email"
           class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-          placeholder="name@example.com" />
-        <p v-if="errors.email" class="text-xs text-red-600">{{ errors.email }}</p>
+          placeholder="name@example.com"
+        />
+        <p v-if="errors.email" class="text-xs text-red-600">
+          {{ errors.email }}
+        </p>
       </div>
 
       <div class="space-y-1">
         <label class="text-sm font-medium">Пароль</label>
-        <input v-model="password" type="password"
+        <input
+          v-model="password"
+          type="password"
           class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-          placeholder="••••••••" />
-        <p v-if="errors.password" class="text-xs text-red-600">{{ errors.password }}</p>
+          placeholder="••••••••"
+        />
+        <p v-if="errors.password" class="text-xs text-red-600">
+          {{ errors.password }}
+        </p>
       </div>
 
       <div v-if="formError" class="border rounded-xl px-4 py-3 text-sm bg-gray-50 text-gray-800">
         {{ formError }}
       </div>
 
-      <button type="submit"
+      <button
+        type="submit"
         class="w-full rounded-full bg-primary text-white py-2 text-sm hover:bg-orange-500 transition"
-        :disabled="loading">
+        :disabled="loading"
+      >
         {{ loading ? 'Зачекайте…' : (mode === 'login' ? 'Увійти' : 'Зареєструватися') }}
       </button>
     </form>

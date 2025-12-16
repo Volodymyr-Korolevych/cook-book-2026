@@ -1,3 +1,5 @@
+// composables/useAuthRedirect.ts
+// Helper to show a styled message on /auth after redirects.
 export function useAuthRedirect() {
   const route = useRoute()
   const authMessage = computed(() => {
