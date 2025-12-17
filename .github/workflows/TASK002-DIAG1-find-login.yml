@@ -1,0 +1,32 @@
+name: TASK002-DIAG1 - Find /login redirects
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ripgrep
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ripgrep
+
+      - name: Search for "/login" and "login"
+        run: |
+          set -euo pipefail
+          echo "=== Searching exact '/login' ==="
+          rg -n --hidden --no-ignore-vcs "/login" . || true
+          echo
+          echo "=== Searching 'navigateTo(.*login' ==="
+          rg -n --hidden --no-ignore-vcs "navigateTo\\([^\\)]*login" . || true
+          echo
+          echo "=== Searching 'middleware.*auth.*global' ==="
+          rg -n --hidden --no-ignore-vcs "middleware|auth\\.global|globalAppMiddleware|sidebase" nuxt.config.* middleware plugins app.vue layouts -S || true
+          echo
+          echo "=== Done ==="
