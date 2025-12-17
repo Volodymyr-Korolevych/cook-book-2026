@@ -1,0 +1,92 @@
+name: TASK002-FIX1 - Remove server-side redirect to /login
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (with credentials)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Configure git identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Apply targeted fix
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== 1) Disable any middleware/*.global.ts that mentions /login ==="
+          if [ -d middleware ]; then
+            while IFS= read -r f; do
+              echo "Found global middleware referencing /login: $f"
+              mv "$f" "${f}.disabled"
+            done < <(grep -RIl --exclude-dir=node_modules --exclude-dir=.nuxt "/login" middleware | grep -E "\.global\.(ts|js)$" || true)
+          fi
+
+          echo
+          echo "=== 2) Remove routeRules redirect '/' -> '/login' in nuxt.config.* if present ==="
+          for cfg in nuxt.config.ts nuxt.config.js nuxt.config.mjs; do
+            if [ -f "$cfg" ]; then
+              echo "Processing $cfg"
+
+              # Make a backup copy for debugging inside the commit
+              cp "$cfg" "${cfg}.bak"
+
+              # Remove common routeRules patterns that redirect root to /login
+              # Patterns handled:
+              # routeRules: { '/': { redirect: '/login' } }
+              # routeRules: { "/": { redirect: "/login" } }
+              # routeRules: { '/': { redirect: { to: '/login' } } }
+              perl -0777 -i -pe '
+                s{
+                  (routeRules\s*:\s*\{)
+                  ([\s\S]*?)
+                  (["'\'']\/["'\'']\s*:\s*\{\s*redirect\s*:\s*(\{[\s\S]*?\}|"[^"]*"|'\''[^'\'']*'\'')\s*\}\s*,?)
+                }{$1$2}gmx;
+              ' "$cfg" || true
+
+              # Also remove exact "redirect: '/login'" anywhere under routeRules for '/'
+              perl -0777 -i -pe '
+                s{
+                  (["'\'']\/["'\'']\s*:\s*\{\s*[^}]*?)
+                  redirect\s*:\s*["'\'']\/login["'\'']\s*,?
+                  ([\s\S]*?\})
+                }{$1$2}gmx;
+              ' "$cfg" || true
+            fi
+          done
+
+          echo
+          echo "=== 3) Show remaining /login references (if any) ==="
+          grep -RIn --exclude-dir=node_modules --exclude-dir=.nuxt "/login" . || true
+
+      - name: Commit changes (if any)
+        shell: bash
+        run: |
+          set -euo pipefail
+          git status --porcelain
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git add -A
+          git commit -m "TASK002-FIX1: remove server-side redirect from / to /login"
+
+      - name: Push to current branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push origin "HEAD:${GITHUB_REF_NAME}"
