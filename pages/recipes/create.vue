@@ -20,6 +20,33 @@
               placeholder="Коротка історія або опис рецепта" />
           </div>
 
+          <!-- Main image upload -->
+          <div class="space-y-2">
+            <div class="flex items-center justify-between">
+              <label class="text-sm font-medium">Зображення страви</label>
+              <button
+                v-if="mainPreviewUrl"
+                type="button"
+                class="text-sm border border-gray-300 rounded-full px-3 py-1.5 hover:bg-gray-50"
+                @click="clearMainImage"
+              >
+                Прибрати
+              </button>
+            </div>
+
+            <input
+              type="file"
+              accept="image/*"
+              class="block w-full text-sm"
+              @change="onMainImageChange"
+            />
+            <p v-if="errors.mainImage" class="text-xs text-red-600">{{ errors.mainImage }}</p>
+
+            <div v-if="mainPreviewUrl" class="rounded-2xl overflow-hidden bg-gray-100 aspect-[4/3]">
+              <img :src="mainPreviewUrl" alt="" class="w-full h-full object-cover" />
+            </div>
+          </div>
+
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div class="space-y-1">
               <label class="text-sm font-medium">Час (хв)</label>
@@ -107,7 +134,7 @@
 
             <p v-if="errors.steps" class="text-xs text-red-600">{{ errors.steps }}</p>
 
-            <div v-for="(st, idx) in form.steps" :key="st._key" class="space-y-2">
+            <div v-for="(st, idx) in form.steps" :key="st._key" class="space-y-3 border-t pt-3">
               <div class="flex items-center justify-between">
                 <div class="text-sm font-medium text-gray-700">Крок {{ idx + 1 }}</div>
                 <button type="button" class="text-gray-500 hover:text-gray-900 text-sm" @click="removeStep(idx)">✕</button>
@@ -115,6 +142,32 @@
 
               <textarea v-model="st.text" rows="3" class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm" placeholder="Опис кроку" />
               <p v-if="stepErrors[idx]" class="text-xs text-red-600">{{ stepErrors[idx] }}</p>
+
+              <!-- Step image upload -->
+              <div class="space-y-2">
+                <div class="flex items-center justify-between">
+                  <label class="text-sm font-medium">Зображення кроку (опційно)</label>
+                  <button
+                    v-if="st.previewUrl"
+                    type="button"
+                    class="text-sm border border-gray-300 rounded-full px-3 py-1.5 hover:bg-gray-50"
+                    @click="clearStepImage(idx)"
+                  >
+                    Прибрати
+                  </button>
+                </div>
+
+                <input
+                  type="file"
+                  accept="image/*"
+                  class="block w-full text-sm"
+                  @change="(e) => onStepImageChange(idx, e)"
+                />
+
+                <div v-if="st.previewUrl" class="rounded-2xl overflow-hidden bg-gray-100 aspect-[4/3]">
+                  <img :src="st.previewUrl" alt="" class="w-full h-full object-cover" />
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -142,14 +195,17 @@ const router = useRouter()
 const client = useSupabaseClient()
 const user = useSupabaseUser()
 const { addToast } = useToasts()
+const { uploadMainImage, uploadStepImage } = useStorageUploads()
 
 const loading = ref(false)
 const formError = ref('')
 
+const mainImageFile = ref<File | null>(null)
+const mainPreviewUrl = ref<string>('')
+
 const form = reactive({
   title: '',
   description: '',
-  main_image_url: '',
   cook_time_minutes: null as number | null,
   servings: 2,
   season: 'winter',
@@ -167,13 +223,43 @@ const makeKey = () => `${Date.now()}-${Math.random()}`
 const addIngredient = () => form.ingredients.push({ _key: makeKey(), name: '', quantity: 0, unit: '' })
 const removeIngredient = (idx: number) => form.ingredients.splice(idx, 1)
 
-const addStep = () => form.steps.push({ _key: makeKey(), text: '', image_url: '' })
+const addStep = () => form.steps.push({ _key: makeKey(), text: '', file: null as File | null, previewUrl: '' as string })
 const removeStep = (idx: number) => form.steps.splice(idx, 1)
 
 onMounted(() => {
   addIngredient()
   addStep()
 })
+
+const onMainImageChange = (e: Event) => {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0] || null
+  mainImageFile.value = file
+  if (mainPreviewUrl.value) URL.revokeObjectURL(mainPreviewUrl.value)
+  mainPreviewUrl.value = file ? URL.createObjectURL(file) : ''
+}
+
+const clearMainImage = () => {
+  mainImageFile.value = null
+  if (mainPreviewUrl.value) URL.revokeObjectURL(mainPreviewUrl.value)
+  mainPreviewUrl.value = ''
+}
+
+const onStepImageChange = (idx: number, e: Event) => {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0] || null
+  const st = form.steps[idx]
+  st.file = file
+  if (st.previewUrl) URL.revokeObjectURL(st.previewUrl)
+  st.previewUrl = file ? URL.createObjectURL(file) : ''
+}
+
+const clearStepImage = (idx: number) => {
+  const st = form.steps[idx]
+  st.file = null
+  if (st.previewUrl) URL.revokeObjectURL(st.previewUrl)
+  st.previewUrl = ''
+}
 
 const validate = () => {
   for (const k of Object.keys(errors)) errors[k] = undefined
@@ -222,23 +308,33 @@ const onSubmit = async () => {
 
   loading.value = true
   try {
+    // 1) Create recipe row first
     const { data: recipe, error: recipeErr } = await client
       .from('recipes')
       .insert({
         author_id: user.value.id,
         title: form.title.trim(),
         description: form.description.trim(),
-        main_image_url: form.main_image_url || null,
+        main_image_url: null,
         cook_time_minutes: form.cook_time_minutes,
         servings: form.servings,
         season: form.season,
         is_public: form.is_public
       })
-      .select('*')
+      .select('id')
       .single()
 
     if (recipeErr) throw recipeErr
 
+    // 2) Upload main image (optional) and update recipe
+    let mainUrl: string | null = null
+    if (mainImageFile.value) {
+      mainUrl = await uploadMainImage(recipe.id, mainImageFile.value)
+      const { error: upErr } = await client.from('recipes').update({ main_image_url: mainUrl }).eq('id', recipe.id)
+      if (upErr) throw upErr
+    }
+
+    // 3) Insert ingredients
     const ingredientsPayload = form.ingredients.map((ing, idx) => ({
       recipe_id: recipe.id,
       name: (ing.name || '').trim(),
@@ -249,12 +345,23 @@ const onSubmit = async () => {
     const { error: ingErr } = await client.from('recipe_ingredients').insert(ingredientsPayload)
     if (ingErr) throw ingErr
 
-    const stepsPayload = form.steps.map((st, idx) => ({
-      recipe_id: recipe.id,
-      step_number: idx + 1,
-      text: (st.text || '').trim(),
-      image_url: st.image_url || null
-    }))
+    // 4) Upload step images (optional) and insert steps
+    const stepsPayload = []
+    for (let i = 0; i < form.steps.length; i++) {
+      const st = form.steps[i]
+      const stepNumber = i + 1
+      let imageUrl: string | null = null
+      if (st.file) {
+        imageUrl = await uploadStepImage(recipe.id, stepNumber, st.file)
+      }
+      stepsPayload.push({
+        recipe_id: recipe.id,
+        step_number: stepNumber,
+        text: (st.text || '').trim(),
+        image_url: imageUrl
+      })
+    }
+
     const { error: stErr } = await client.from('recipe_steps').insert(stepsPayload)
     if (stErr) throw stErr
 
