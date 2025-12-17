@@ -1,0 +1,60 @@
+name: TASK002-DIAG3 - Scan redirects (/login) + Supabase usage
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: List key folders
+        run: |
+          set -euo pipefail
+          echo "== middleware =="
+          ls -la middleware 2>/dev/null || true
+          echo
+          echo "== server =="
+          ls -la server 2>/dev/null || true
+          echo
+          echo "== plugins =="
+          ls -la plugins 2>/dev/null || true
+          echo
+          echo "== layouts =="
+          ls -la layouts 2>/dev/null || true
+          echo
+          echo "== nuxt.config.* =="
+          ls -la nuxt.config.* 2>/dev/null || true
+
+      - name: Search for redirects to /login
+        run: |
+          set -euo pipefail
+          echo "== grep '/login' in repo =="
+          grep -RIn --exclude-dir=node_modules --exclude-dir=.nuxt "/login" . || true
+          echo
+          echo "== grep 'redirect' / 'routeRules' / 'sendRedirect' =="
+          grep -RIn --exclude-dir=node_modules --exclude-dir=.nuxt -E "routeRules|redirect|sendRedirect|navigateTo\(" . || true
+
+      - name: Search for auth modules that default to /login
+        run: |
+          set -euo pipefail
+          echo "== auth modules hints in package.json =="
+          cat package.json | grep -E "@sidebase/nuxt-auth|nuxt-auth|auth" || true
+          echo
+          echo "== auth config hints in nuxt.config.* =="
+          for f in nuxt.config.ts nuxt.config.js nuxt.config.mjs; do
+            test -f "$f" && (echo "--- $f ---"; grep -nE "@sidebase/nuxt-auth|signInPage|auth|routeRules|redirect" "$f" || true)
+          done
+
+      - name: Search for Supabase env usage & client creation
+        run: |
+          set -euo pipefail
+          echo "== env keys usage (SUPABASE URL/KEY) =="
+          grep -RIn --exclude-dir=node_modules --exclude-dir=.nuxt -E "SUPABASE|ANON|SERVICE_ROLE" . || true
+          echo
+          echo "== createClient / useSupabaseClient usage =="
+          grep -RIn --exclude-dir=node_modules --exclude-dir=.nuxt -E "createClient|useSupabaseClient|createServerClient" . || true
