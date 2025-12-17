@@ -2,13 +2,6 @@
 export default defineNuxtConfig({
   modules: ['@nuxtjs/tailwindcss', '@nuxtjs/supabase'],
 
-  runtimeConfig: {
-    public: {
-      supabaseUrl: process.env.SUPABASE_URL,
-      supabaseKey: process.env.SUPABASE_ANON_KEY
-    }
-  },
-
   app: {
     head: {
       title: 'Кулінарні рецепти',
@@ -17,6 +10,12 @@ export default defineNuxtConfig({
       ]
     }
   },
-
-  devtools: { enabled: true }
+  
+  supabase: {
+    // keys will come from .env
+    redirect: false
+  }
+,
+  devtools: { enabled: true },
+  compatibilityDate: '2025-12-17'
 })
