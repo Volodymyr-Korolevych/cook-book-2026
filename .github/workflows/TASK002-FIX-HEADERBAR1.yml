@@ -1,0 +1,136 @@
+name: TASK002-FIX-HEADERBAR1 - Use HeaderBar in default layout
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Apply changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p components
+          mkdir -p layouts
+
+          # =========================
+          # components/HeaderBar.vue
+          # (твоя версія, щоб точно була в repo)
+          # =========================
+          cat > components/HeaderBar.vue <<'EOF'
+          <template>
+              <header class="border-b bg-white">
+                  <div class="max-w-6xl mx-auto px-4 md:px-6 lg:px-8 py-3 flex items-center gap-4">
+                      <!-- ЛОГО -->
+                      <div class="font-semibold text-lg">
+                          Кулінарні рецепти
+                      </div>
+
+                      <!-- ПОШУК (по центру) -->
+                      <div class="flex-1 flex justify-center">
+                          <form class="w-full max-w-md" @submit.prevent="onSearch">
+                              <input v-model="query" type="search" placeholder="Знайти рецепт..."
+                                  class="w-full border border-gray-300 rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent" />
+                          </form>
+                      </div>
+
+                      <!-- ДІЇ КОРИСТУВАЧА -->
+                      <div class="flex items-center gap-3">
+                          <button v-if="user" type="button"
+                              class="hidden sm:inline-flex items-center rounded-full bg-primary text-white text-sm px-4 py-2 hover:bg-orange-500 transition"
+                              @click="goCreate">
+                              Створити рецепт
+                          </button>
+
+                          <button v-if="!user" type="button"
+                              class="text-sm border border-gray-300 rounded-full px-4 py-2 hover:bg-gray-50" @click="goAuth">
+                              Вхід
+                          </button>
+
+                          <button v-else type="button"
+                              class="w-9 h-9 rounded-full bg-gray-200 flex items-center justify-center text-sm font-medium hover:bg-gray-300"
+                              @click="goProfile">
+                              {{ initials }}
+                          </button>
+                      </div>
+                  </div>
+              </header>
+          </template>
+
+          <script setup lang="ts">
+          const router = useRouter()
+          const route = useRoute()
+          const user = useSupabaseUser()
+
+          const query = ref<string>((route.query.q as string) || '')
+
+          const onSearch = () => {
+              const q = query.value.trim()
+              if (!q) return
+              router.push({ path: '/search', query: { q } })
+          }
+
+          const goAuth = () => router.push('/auth')
+          const goProfile = () => router.push('/profile')
+          const goCreate = () => router.push('/recipes/create')
+
+          const initials = computed(() => {
+              const email = user.value?.email ?? ''
+              return email ? email.charAt(0).toUpperCase() : 'U'
+          })
+          </script>
+          EOF
+
+          # =========================
+          # layouts/default.vue
+          # Використовує HeaderBar.vue
+          # =========================
+          cat > layouts/default.vue <<'EOF'
+          <template>
+            <div class="min-h-screen bg-white text-gray-900">
+              <HeaderBar />
+
+              <main class="max-w-6xl mx-auto px-4 md:px-6 lg:px-8 py-6">
+                <slot />
+              </main>
+            </div>
+          </template>
+
+          <script setup lang="ts">
+          // компонент HeaderBar буде авто-імпортований з /components
+          </script>
+          EOF
+
+          echo "TASK002-FIX-HEADERBAR1 applied."
+
+      - name: Commit changes (if any)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git add -A
+          git commit -m "TASK002-FIX-HEADERBAR1: use HeaderBar component in default layout"
+
+      - name: Push
+        shell: bash
+        run: |
+          git push origin "HEAD:${GITHUB_REF_NAME}"
