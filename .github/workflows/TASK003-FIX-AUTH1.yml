@@ -1,0 +1,320 @@
+name: TASK003-FIX-AUTH1 - Better auth error handling (login/signup)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Apply changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p composables
+          mkdir -p pages
+
+          # =========================
+          # composables/useAuth.ts
+          # =========================
+          cat > composables/useAuth.ts <<'EOF'
+          // composables/useAuth.ts
+          type FriendlyAuthError = {
+            message: string
+            raw?: unknown
+          }
+
+          const normalizeAuthError = (err: any): FriendlyAuthError => {
+            const msg = String(err?.message || '')
+
+            // Supabase часто повертає англомовні повідомлення — мапимо на зрозумілі українські
+            if (/invalid login credentials/i.test(msg)) {
+              return { message: 'Неправильний email або пароль', raw: err }
+            }
+
+            if (/email not confirmed/i.test(msg)) {
+              return { message: 'Email не підтверджено. Перевірте пошту та підтвердіть адресу', raw: err }
+            }
+
+            if (/user already registered|already registered/i.test(msg)) {
+              return { message: 'Цей email вже зареєстрований. Спробуйте увійти', raw: err }
+            }
+
+            if (/password should be at least|weak password/i.test(msg)) {
+              return { message: 'Пароль має містити щонайменше 6 символів', raw: err }
+            }
+
+            if (/unable to validate email address|invalid email/i.test(msg)) {
+              return { message: 'Вкажіть коректний email', raw: err }
+            }
+
+            if (/email rate limit exceeded|rate limit/i.test(msg)) {
+              return { message: 'Забагато спроб. Спробуйте трохи пізніше', raw: err }
+            }
+
+            if (/signup is disabled/i.test(msg)) {
+              return { message: 'Реєстрація тимчасово вимкнена', raw: err }
+            }
+
+            if (/database error saving new user/i.test(msg)) {
+              return { message: 'Не вдалося створити акаунт (помилка сервера). Спробуйте пізніше', raw: err }
+            }
+
+            // RLS типова для profiles insert
+            if (/row-level security|violates row-level security/i.test(msg)) {
+              return { message: 'Операцію заблоковано правилами доступу (RLS). Перевірте політики Supabase', raw: err }
+            }
+
+            // fallback
+            return { message: 'Сталася помилка. Спробуйте ще раз', raw: err }
+          }
+
+          export function useAuth() {
+            const client = useSupabaseClient()
+            const user = useSupabaseUser()
+            const { addToast } = useToasts()
+
+            const signIn = async (email: string, password: string) => {
+              const { error } = await client.auth.signInWithPassword({ email, password })
+              if (error) {
+                const fe = normalizeAuthError(error)
+                addToast(fe.message)
+                throw new Error(fe.message)
+              }
+            }
+
+            const signUp = async (email: string, password: string, displayName: string) => {
+              const { data, error } = await client.auth.signUp({ email, password })
+
+              if (error) {
+                const fe = normalizeAuthError(error)
+                addToast(fe.message)
+                throw new Error(fe.message)
+              }
+
+              // створення профілю (може впасти через RLS — тоді покажемо окреме зрозуміле повідомлення)
+              if (data.user) {
+                const { error: профErr } = await client.from('profiles').insert({
+                  id: data.user.id,
+                  display_name: displayName
+                })
+
+                if (профErr) {
+                  const fe = normalizeAuthError(профErr)
+                  // акаунт вже створено, але профіль не вставився
+                  addToast('Акаунт створено, але профіль не збережено')
+                  throw new Error(`Акаунт створено, але профіль не збережено. ${fe.message}`)
+                }
+              }
+            }
+
+            const signOut = async () => {
+              await client.auth.signOut()
+            }
+
+            return { user, signIn, signUp, signOut }
+          }
+          EOF
+
+          # =========================
+          # pages/auth.vue
+          # =========================
+          cat > pages/auth.vue <<'EOF'
+          <template>
+            <div class="max-w-lg mx-auto space-y-6">
+              <h1 class="text-2xl font-semibold">Вхід / Реєстрація</h1>
+
+              <div
+                v-if="authMessage"
+                class="border rounded-xl px-4 py-3 text-sm bg-gray-50 text-gray-800"
+              >
+                {{ authMessage }}
+              </div>
+
+              <div class="flex gap-2">
+                <button
+                  type="button"
+                  class="px-4 py-2 rounded-full text-sm border"
+                  :class="mode === 'login'
+                    ? 'bg-gray-900 text-white border-gray-900'
+                    : 'border-gray-300 hover:bg-gray-50'"
+                  @click="mode = 'login'"
+                >
+                  Вхід
+                </button>
+
+                <button
+                  type="button"
+                  class="px-4 py-2 rounded-full text-sm border"
+                  :class="mode === 'register'
+                    ? 'bg-gray-900 text-white border-gray-900'
+                    : 'border-gray-300 hover:bg-gray-50'"
+                  @click="mode = 'register'"
+                >
+                  Реєстрація
+                </button>
+              </div>
+
+              <form class="space-y-4" @submit.prevent="onSubmit">
+                <div v-if="mode === 'register'" class="space-y-1">
+                  <label class="text-sm font-medium">Ім’я</label>
+                  <input
+                    v-model="displayName"
+                    type="text"
+                    class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                    placeholder="Ваше ім’я"
+                  />
+                  <p v-if="errors.displayName" class="text-xs text-red-600">{{ errors.displayName }}</p>
+                </div>
+
+                <div class="space-y-1">
+                  <label class="text-sm font-medium">Email</label>
+                  <input
+                    v-model="email"
+                    type="email"
+                    class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                    placeholder="name@example.com"
+                    autocomplete="email"
+                  />
+                  <p v-if="errors.email" class="text-xs text-red-600">{{ errors.email }}</p>
+                </div>
+
+                <div class="space-y-1">
+                  <label class="text-sm font-medium">Пароль</label>
+                  <input
+                    v-model="password"
+                    type="password"
+                    class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                    placeholder="••••••••"
+                    autocomplete="current-password"
+                  />
+                  <p v-if="errors.password" class="text-xs text-red-600">{{ errors.password }}</p>
+                </div>
+
+                <div v-if="formError" class="border rounded-xl px-4 py-3 text-sm bg-gray-50 text-gray-800">
+                  {{ formError }}
+                </div>
+
+                <button
+                  type="submit"
+                  class="w-full rounded-full bg-primary text-white py-2 text-sm hover:bg-orange-500 transition"
+                  :disabled="loading"
+                >
+                  {{ loading ? 'Зачекайте…' : (mode === 'login' ? 'Увійти' : 'Зареєструватися') }}
+                </button>
+
+                <p v-if="mode === 'register'" class="text-xs text-gray-600">
+                  Пароль має містити щонайменше 6 символів.
+                </p>
+              </form>
+            </div>
+          </template>
+
+          <script setup lang="ts">
+          const router = useRouter()
+          const { addToast } = useToasts()
+          const { authMessage } = useAuthRedirect()
+          const { signIn, signUp } = useAuth()
+
+          const mode = ref<'login' | 'register'>('login')
+          const loading = ref(false)
+
+          const email = ref('')
+          const password = ref('')
+          const displayName = ref('')
+
+          const errors = reactive<{ email?: string; password?: string; displayName?: string }>({})
+          const formError = ref('')
+
+          const resetErrors = () => {
+            errors.email = undefined
+            errors.password = undefined
+            errors.displayName = undefined
+            formError.value = ''
+          }
+
+          // Ключове: щоб не було “перенесення” неправильних даних/помилок між вкладками
+          watch(mode, () => {
+            resetErrors()
+            password.value = ''
+            if (mode.value === 'login') displayName.value = ''
+          })
+
+          const validate = () => {
+            resetErrors()
+
+            const e = email.value.trim()
+            const p = password.value
+
+            if (!e) errors.email = 'Вкажіть email'
+            else if (!/^\S+@\S+\.\S+$/.test(e)) errors.email = 'Вкажіть коректний email'
+
+            if (!p) errors.password = 'Вкажіть пароль'
+            else if (mode.value === 'register' && p.length < 6) errors.password = 'Пароль має містити щонайменше 6 символів'
+
+            if (mode.value === 'register') {
+              const dn = displayName.value.trim()
+              if (!dn) errors.displayName = 'Вкажіть ім’я'
+              else if (dn.length < 2) errors.displayName = 'Ім’я має містити щонайменше 2 символи'
+              else if (dn.length > 50) errors.displayName = 'Ім’я має бути не довше 50 символів'
+            }
+
+            return !errors.email && !errors.password && !errors.displayName
+          }
+
+          const onSubmit = async () => {
+            if (!validate()) return
+
+            loading.value = true
+            try {
+              if (mode.value === 'login') {
+                await signIn(email.value.trim(), password.value)
+                addToast('Ви увійшли в акаунт')
+              } else {
+                await signUp(email.value.trim(), password.value, displayName.value.trim())
+                addToast('Акаунт створено')
+              }
+
+              await router.push('/profile')
+            } catch (e: any) {
+              // тепер показуємо точне повідомлення, яке сформувало useAuth()
+              formError.value = String(e?.message || 'Сталася помилка. Спробуйте ще раз')
+            } finally {
+              loading.value = false
+            }
+          }
+          </script>
+          EOF
+
+          echo "TASK003-FIX-AUTH1 applied."
+
+      - name: Commit changes (if any)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git add -A
+          git commit -m "TASK003-FIX-AUTH1: improve login/signup error handling and reset form state"
+
+      - name: Push
+        shell: bash
+        run: |
+          git push origin "HEAD:${GITHUB_REF_NAME}"
