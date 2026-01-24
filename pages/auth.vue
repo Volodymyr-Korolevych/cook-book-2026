@@ -16,7 +16,7 @@
         :class="mode === 'login'
           ? 'bg-gray-900 text-white border-gray-900'
           : 'border-gray-300 hover:bg-gray-50'"
-        @click="mode = 'login'"
+        @click="setMode('login')"
       >
         Вхід
       </button>
@@ -27,20 +27,14 @@
         :class="mode === 'register'
           ? 'bg-gray-900 text-white border-gray-900'
           : 'border-gray-300 hover:bg-gray-50'"
-        @click="mode = 'register'"
+        @click="setMode('register')"
       >
         Реєстрація
       </button>
     </div>
 
-    <!--
-      Important: block autofill as much as possible.
-      - form autocomplete="off"
-      - hidden honeypot inputs (browser often fills these instead)
-      - real inputs use autocomplete hints that reduce password-manager overlays
-    -->
     <form class="space-y-4" @submit.prevent="onSubmit" autocomplete="off">
-      <!-- Honeypot (autofill trap). Keep before real fields -->
+      <!-- Honeypot (autofill trap) -->
       <input
         type="text"
         name="username"
@@ -75,7 +69,7 @@
         <input
           id="email"
           v-model="email"
-          type="email"
+          type="text"
           name="email"
           inputmode="email"
           autocapitalize="none"
@@ -84,7 +78,6 @@
           class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
           placeholder="name@example.com"
         />
-        <!-- Put error with spacing so overlay is less likely to cover it -->
         <p v-if="errors.email" class="mt-2 text-xs text-red-600">{{ errors.email }}</p>
       </div>
 
@@ -123,6 +116,7 @@
 
 <script setup lang="ts">
 const router = useRouter()
+const route = useRoute()
 const { addToast } = useToasts()
 const { authMessage } = useAuthRedirect()
 const { signIn, signUp } = useAuth()
@@ -144,12 +138,27 @@ const resetErrors = () => {
   formError.value = ''
 }
 
-watch(mode, () => {
-  resetErrors()
-  // clear password to avoid browser-suggested values leaking between modes
+const clearFields = () => {
+  email.value = ''
   password.value = ''
-  if (mode.value === 'login') displayName.value = ''
-})
+  displayName.value = ''
+}
+
+const clearAuthMsgFromUrl = async () => {
+  // прибираємо ?msg=... щоб воно не “висіло” після перемикань
+  if (route.query.msg) {
+    const nextQuery = { ...route.query }
+    delete (nextQuery as any).msg
+    await router.replace({ path: route.path, query: nextQuery })
+  }
+}
+
+const setMode = async (next: 'login' | 'register') => {
+  mode.value = next
+  resetErrors()
+  clearFields()
+  await clearAuthMsgFromUrl()
+}
 
 const validate = () => {
   resetErrors()
