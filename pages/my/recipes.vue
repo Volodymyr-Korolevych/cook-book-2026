@@ -2,12 +2,12 @@
   <div class="space-y-6">
     <div class="flex items-baseline justify-between gap-3">
       <h1 class="text-2xl font-semibold">Мої рецепти</h1>
-      <NuxtLink
+<!--       <NuxtLink
         to="/recipes/create"
         class="rounded-full bg-primary text-white text-sm px-4 py-2 hover:bg-orange-500 transition"
       >
         Створити рецепт
-      </NuxtLink>
+      </NuxtLink> -->
     </div>
 
     <p v-if="loaded && recipes.length === 0" class="text-sm text-gray-600">

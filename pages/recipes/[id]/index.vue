@@ -109,7 +109,7 @@
             @click="onSave"
             type="button"
           >
-            Зберегти
+            Зберегти в папці "Збережені рецепти"
           </button>
 
           <button

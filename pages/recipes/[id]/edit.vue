@@ -100,7 +100,7 @@
 
             <div v-for="(ing, idx) in ingredients" :key="idx" class="grid grid-cols-12 gap-2">
               <input v-model="ing.name" class="col-span-6 border rounded-xl px-3 py-2 text-sm" placeholder="Назва" />
-              <input v-model.number="ing.quantity" type="number" step="0.01" class="col-span-3 border rounded-xl px-3 py-2 text-sm" placeholder="К-сть" />
+              <input v-model.number="ing.quantity" type="number" step="0.1" class="col-span-3 border rounded-xl px-3 py-2 text-sm" placeholder="К-сть" />
               <input v-model="ing.unit" class="col-span-2 border rounded-xl px-3 py-2 text-sm" placeholder="Од." />
               <button type="button" class="col-span-1 text-sm" @click="removeIngredient(idx)">✕</button>
             </div>

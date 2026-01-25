@@ -2,12 +2,12 @@
     <div class="space-y-8">
         <!-- Hero -->
         <section>
-            <h1 class="text-2xl md:text-3xl font-semibold mb-2">
-                Знаходь рецепти своїх улюблених страв.
+            <h1 class="text-center text-2xl md:text-3xl font-semibold mb-2">
+                Знаходь рецепти своїх улюблених страв
             </h1>
-            <p class="text-sm text-gray-600 max-w-xl">
-                Переглядай нові страви, обирай сезонні і зберігай улюблені рецепти у своєму профілі.
-            </p>
+            <h1 class="text-center text-sm text-gray-600 mb-2">
+                Переглядай нові страви, обирай сезонні і зберігай улюблені рецепти у своєму профілі
+            </h1>
         </section>
 
         <!-- Сезонні -->
