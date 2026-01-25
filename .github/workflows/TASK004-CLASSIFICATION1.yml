@@ -1,0 +1,1230 @@
+name: TASK004-CLASSIFICATION1 - Multi seasons + dish types + search parsing
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Apply changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p components
+          mkdir -p pages
+          mkdir -p pages/recipes/[id]
+          mkdir -p pages/recipes
+          mkdir -p supabase/migrations
+
+          # =========================
+          # 1) SQL migration: new tables + RLS policies
+          # =========================
+          cat > supabase/migrations/20260125_01_recipe_classification.sql <<'EOF'
+          -- TASK004: Multi seasons + dish types
+          -- Adds:
+          --  - recipe_seasons (M:N)
+          --  - recipe_dish_types (M:N)
+          -- With minimal RLS policies similar to ingredients/steps
+
+          -- 1) recipe_seasons
+          create table if not exists public.recipe_seasons (
+            recipe_id uuid not null references public.recipes(id) on delete cascade,
+            season text not null check (season in ('winter','spring','summer','autumn')),
+            created_at timestamp with time zone default now(),
+            primary key (recipe_id, season)
+          );
+
+          alter table public.recipe_seasons enable row level security;
+
+          create policy if not exists "Public can read seasons of public recipes"
+          on public.recipe_seasons for select
+          to public
+          using (
+            exists (
+              select 1 from public.recipes r
+              where r.id = recipe_seasons.recipe_id
+                and r.is_public = true
+            )
+          );
+
+          create policy if not exists "Author can manage seasons of own recipes"
+          on public.recipe_seasons for all
+          to authenticated
+          using (
+            exists (
+              select 1 from public.recipes r
+              where r.id = recipe_seasons.recipe_id
+                and r.author_id = auth.uid()
+            )
+          )
+          with check (
+            exists (
+              select 1 from public.recipes r
+              where r.id = recipe_seasons.recipe_id
+                and r.author_id = auth.uid()
+            )
+          );
+
+          -- 2) recipe_dish_types
+          create table if not exists public.recipe_dish_types (
+            recipe_id uuid not null references public.recipes(id) on delete cascade,
+            dish_type text not null check (dish_type in ('breakfast','lunch','dinner','dessert')),
+            created_at timestamp with time zone default now(),
+            primary key (recipe_id, dish_type)
+          );
+
+          alter table public.recipe_dish_types enable row level security;
+
+          create policy if not exists "Public can read dish types of public recipes"
+          on public.recipe_dish_types for select
+          to public
+          using (
+            exists (
+              select 1 from public.recipes r
+              where r.id = recipe_dish_types.recipe_id
+                and r.is_public = true
+            )
+          );
+
+          create policy if not exists "Author can manage dish types of own recipes"
+          on public.recipe_dish_types for all
+          to authenticated
+          using (
+            exists (
+              select 1 from public.recipes r
+              where r.id = recipe_dish_types.recipe_id
+                and r.author_id = auth.uid()
+            )
+          )
+          with check (
+            exists (
+              select 1 from public.recipes r
+              where r.id = recipe_dish_types.recipe_id
+                and r.author_id = auth.uid()
+            )
+          );
+          EOF
+
+          # =========================
+          # 2) components/RecipeCard.vue
+          # Show: Author, Seasons, Dish types, Cook time
+          # =========================
+          cat > components/RecipeCard.vue <<'EOF'
+          <template>
+            <NuxtLink
+              :to="`/recipes/${recipe.id}`"
+              class="group block rounded-2xl border border-gray-100 bg-white overflow-hidden hover:shadow-sm transition"
+            >
+              <div class="aspect-[4/3] bg-gray-100 overflow-hidden">
+                <img
+                  v-if="recipe.main_image_url"
+                  :src="recipe.main_image_url"
+                  alt=""
+                  class="w-full h-full object-cover group-hover:scale-[1.02] transition"
+                  loading="lazy"
+                />
+                <div v-else class="w-full h-full flex items-center justify-center text-sm text-gray-500">
+                  Без зображення
+                </div>
+              </div>
+
+              <div class="p-4 space-y-2">
+                <div class="font-semibold leading-snug line-clamp-2">
+                  {{ recipe.title }}
+                </div>
+
+                <div class="text-xs text-gray-600 space-y-1">
+                  <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span>Автор: {{ authorLabel }}</span>
+                    <span v-if="cookTime">• {{ cookTime }}</span>
+                  </div>
+
+                  <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span v-if="seasonText">Сезон: {{ seasonText }}</span>
+                    <span v-if="seasonText && dishTypeText">•</span>
+                    <span v-if="dishTypeText">Тип: {{ dishTypeText }}</span>
+                  </div>
+                </div>
+              </div>
+            </NuxtLink>
+          </template>
+
+          <script setup lang="ts">
+          const SEASON_LABEL: Record<string, string> = {
+            winter: 'Зима',
+            spring: 'Весна',
+            summer: 'Літо',
+            autumn: 'Осінь'
+          }
+
+          const DISH_LABEL: Record<string, string> = {
+            breakfast: 'Сніданок',
+            lunch: 'Обід',
+            dinner: 'Вечеря',
+            dessert: 'Десерт'
+          }
+
+          // Simple author cache to avoid repeated per-card requests
+          const authorCache = (globalThis as any).__authorCache || ((globalThis as any).__authorCache = new Map<string, string>())
+
+          type Recipe = {
+            id: string
+            title: string
+            main_image_url?: string | null
+            cook_time_minutes?: number | null
+            author_name?: string | null
+            author_id?: string | null
+
+            // new relations (if selected in query)
+            recipe_seasons?: Array<{ season: string }>
+            recipe_dish_types?: Array<{ dish_type: string }>
+
+            // backward-compat (old single season)
+            season?: string | null
+          }
+
+          const props = defineProps<{ recipe: Recipe }>()
+          const client = useSupabaseClient()
+
+          const cookTime = computed(() => {
+            const n = props.recipe.cook_time_minutes
+            return n ? `${n} хв` : ''
+          })
+
+          const seasons = computed<string[]>(() => {
+            const rel = props.recipe.recipe_seasons?.map(x => x.season).filter(Boolean) ?? []
+            if (rel.length) return Array.from(new Set(rel))
+
+            // fallback: old single season
+            const s = props.recipe.season
+            return s ? [s] : []
+          })
+
+          const dishTypes = computed<string[]>(() => {
+            const rel = props.recipe.recipe_dish_types?.map(x => x.dish_type).filter(Boolean) ?? []
+            return Array.from(new Set(rel))
+          })
+
+          const seasonText = computed(() => seasons.value.map(s => SEASON_LABEL[s] || s).join(', '))
+          const dishTypeText = computed(() => dishTypes.value.map(t => DISH_LABEL[t] || t).join(', '))
+
+          const authorLabel = ref<string>('Автор')
+
+          const loadAuthor = async () => {
+            const direct = props.recipe.author_name
+            if (direct) {
+              authorLabel.value = direct
+              return
+            }
+
+            const id = props.recipe.author_id
+            if (!id) return
+
+            const cached = authorCache.get(id)
+            if (cached) {
+              authorLabel.value = cached
+              return
+            }
+
+            const { data } = await client.from('profiles').select('display_name').eq('id', id).maybeSingle()
+            const name = data?.display_name || 'Автор'
+            authorCache.set(id, name)
+            authorLabel.value = name
+          }
+
+          onMounted(loadAuthor)
+          watch(() => props.recipe.author_id, loadAuthor)
+          </script>
+          EOF
+
+          # =========================
+          # 3) pages/search.vue
+          # Implements keyword parsing + OR search logic
+          # =========================
+          cat > pages/search.vue <<'EOF'
+          <template>
+            <div class="space-y-6">
+              <h1 class="text-xl font-semibold">Результати пошуку</h1>
+
+              <p v-if="loaded && !recipes.length" class="text-sm text-gray-500">
+                Нічого не знайдено за запитом «{{ q }}».
+              </p>
+
+              <RecipeGrid
+                v-else-if="recipes.length"
+                :recipes="recipes"
+                @saveAsGuest="openGuestModal"
+              />
+
+              <Modal
+                :model-value="showGuestModal"
+                title="Увійдіть, щоб зберігати рецепти"
+                message="Збережені рецепти будуть доступні у вашому профілі."
+                cancel-text="Закрити"
+                confirm-text="Увійти"
+                @cancel="showGuestModal = false"
+                @confirm="goAuth"
+              />
+            </div>
+          </template>
+
+          <script setup lang="ts">
+          import RecipeGrid from '~/components/RecipeGrid.vue'
+          import Modal from '~/components/Modal.vue'
+
+          const route = useRoute()
+          const router = useRouter()
+          const client = useSupabaseClient()
+
+          const q = computed(() => (route.query.q as string) || '')
+
+          const recipes = ref<any[]>([])
+          const loaded = ref(false)
+          const showGuestModal = ref(false)
+
+          const SEASON_KEYWORDS: Record<string, string> = {
+            'зима': 'winter',
+            'весна': 'spring',
+            'літо': 'summer',
+            'осінь': 'autumn'
+          }
+
+          const DISH_KEYWORDS: Record<string, string> = {
+            'сніданок': 'breakfast',
+            'обід': 'lunch',
+            'вечеря': 'dinner',
+            'десерт': 'dessert'
+          }
+
+          const normalize = (s: string) =>
+            s
+              .toLowerCase()
+              .replace(/[’'`]/g, "'")
+              .replace(/[^a-zа-яіїєґ0-9\s'-]+/gi, ' ')
+              .replace(/\s+/g, ' ')
+              .trim()
+
+          const parseQuery = (raw: string) => {
+            const text = normalize(raw)
+            const tokens = text ? text.split(' ') : []
+
+            const seasons = new Set<string>()
+            const dishTypes = new Set<string>()
+            const other: string[] = []
+
+            for (const t of tokens) {
+              if (SEASON_KEYWORDS[t]) seasons.add(SEASON_KEYWORDS[t])
+              else if (DISH_KEYWORDS[t]) dishTypes.add(DISH_KEYWORDS[t])
+              else other.push(t)
+            }
+
+            return {
+              seasons: Array.from(seasons),
+              dishTypes: Array.from(dishTypes),
+              otherTerms: other.filter(Boolean)
+            }
+          }
+
+          const fetchRecipeIdsByText = async (terms: string[]) => {
+            if (!terms.length) return new Set<string>()
+
+            const likeClauses = terms.flatMap(t => [
+              `title.ilike.%${t}%`,
+              `description.ilike.%${t}%`
+            ])
+
+            const { data, error } = await client
+              .from('recipes')
+              .select('id')
+              .eq('is_public', true)
+              .or(likeClauses.join(','))
+
+            if (error) return new Set<string>()
+            return new Set((data || []).map((x: any) => x.id))
+          }
+
+          const fetchRecipeIdsByIngredients = async (terms: string[]) => {
+            if (!terms.length) return new Set<string>()
+
+            const likeClauses = terms.map(t => `name.ilike.%${t}%`)
+            const { data, error } = await client
+              .from('recipe_ingredients')
+              .select('recipe_id')
+              .or(likeClauses.join(','))
+
+            if (error) return new Set<string>()
+            return new Set((data || []).map((x: any) => x.recipe_id))
+          }
+
+          const fetchRecipesByIds = async (ids: string[]) => {
+            if (!ids.length) return []
+
+            const { data, error } = await client
+              .from('recipes')
+              .select(`
+                id, title, description, main_image_url, cook_time_minutes, servings, is_public, author_id, created_at,
+                recipe_seasons(season),
+                recipe_dish_types(dish_type)
+              `)
+              .in('id', ids)
+              .eq('is_public', true)
+              .order('created_at', { ascending: false })
+
+            if (error) return []
+            return data || []
+          }
+
+          const applyRelationFilters = (rows: any[], seasons: string[], dishTypes: string[]) => {
+            return rows.filter(r => {
+              const rSeasons = (r.recipe_seasons || []).map((x: any) => x.season)
+              const rTypes = (r.recipe_dish_types || []).map((x: any) => x.dish_type)
+
+              const seasonOk = seasons.length ? seasons.some(s => rSeasons.includes(s)) : true
+              const typeOk = dishTypes.length ? dishTypes.some(t => rTypes.includes(t)) : true
+
+              return seasonOk && typeOk
+            })
+          }
+
+          const runSearch = async (raw: string) => {
+            const trimmed = raw.trim()
+            if (!trimmed) return []
+
+            const { seasons, dishTypes, otherTerms } = parseQuery(trimmed)
+
+            // 1) Candidate IDs from "other terms" (OR logic): title/description OR ingredients
+            let ids = new Set<string>()
+
+            if (otherTerms.length) {
+              const [a, b] = await Promise.all([
+                fetchRecipeIdsByText(otherTerms),
+                fetchRecipeIdsByIngredients(otherTerms)
+              ])
+              for (const id of a) ids.add(id)
+              for (const id of b) ids.add(id)
+            } else {
+              // Якщо введені лише ключові слова (сезон/тип), беремо "всі публічні" як базу і потім відфільтруємо
+              const { data } = await client.from('recipes').select('id').eq('is_public', true)
+              ;(data || []).forEach((x: any) => ids.add(x.id))
+            }
+
+            const rows = await fetchRecipesByIds(Array.from(ids))
+            return applyRelationFilters(rows, seasons, dishTypes)
+          }
+
+          watch(
+            q,
+            async (value) => {
+              loaded.value = false
+              recipes.value = []
+              recipes.value = await runSearch(value || '')
+              loaded.value = true
+            },
+            { immediate: true }
+          )
+
+          const openGuestModal = () => {
+            showGuestModal.value = true
+          }
+
+          const goAuth = () => {
+            showGuestModal.value = false
+            router.push('/auth')
+          }
+          </script>
+          EOF
+
+          # =========================
+          # 4) pages/recipes/create.vue
+          # Checkboxes + save into join tables
+          # =========================
+          cat > pages/recipes/create.vue <<'EOF'
+          <template>
+            <div class="max-w-4xl mx-auto space-y-6">
+              <h1 class="text-2xl font-semibold">Створення рецепта</h1>
+
+              <form class="space-y-6" @submit.prevent="onSubmit">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <!-- Left -->
+                  <div class="space-y-4">
+                    <div class="space-y-1">
+                      <label class="text-sm font-medium">Назва</label>
+                      <input
+                        v-model="form.title"
+                        type="text"
+                        autocomplete="off"
+                        class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                        placeholder="Наприклад: Борщ"
+                      />
+                      <p v-if="errors.title" class="text-xs text-red-600">{{ errors.title }}</p>
+                    </div>
+
+                    <div class="space-y-1">
+                      <label class="text-sm font-medium">Опис</label>
+                      <textarea
+                        v-model="form.description"
+                        rows="5"
+                        class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                        placeholder="Коротко опишіть рецепт"
+                      />
+                    </div>
+
+                    <div class="space-y-1">
+                      <label class="text-sm font-medium">Головне фото</label>
+                      <input type="file" accept="image/*" class="block w-full text-sm" @change="onMainImageChange" />
+                      <p v-if="errors.mainImage" class="text-xs text-red-600">{{ errors.mainImage }}</p>
+
+                      <div v-if="mainPreviewUrl" class="rounded-2xl overflow-hidden bg-gray-100 aspect-[4/3]">
+                        <img :src="mainPreviewUrl" alt="" class="w-full h-full object-cover" />
+                      </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div class="space-y-1">
+                        <label class="text-sm font-medium">Час (хв)</label>
+                        <input
+                          v-model.number="form.cook_time_minutes"
+                          type="number"
+                          min="1"
+                          class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                        />
+                        <p v-if="errors.cook_time_minutes" class="text-xs text-red-600">{{ errors.cook_time_minutes }}</p>
+                      </div>
+
+                      <div class="space-y-1">
+                        <label class="text-sm font-medium">Порції (базово)</label>
+                        <input
+                          v-model.number="form.servings"
+                          type="number"
+                          min="1"
+                          class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                        />
+                        <p v-if="errors.servings" class="text-xs text-red-600">{{ errors.servings }}</p>
+                      </div>
+                    </div>
+
+                    <div class="space-y-2">
+                      <div class="text-sm font-medium">Сезонність (можна кілька)</div>
+                      <div class="grid grid-cols-2 gap-2">
+                        <label v-for="s in SEASONS" :key="s.value" class="flex items-center gap-2 text-sm">
+                          <input type="checkbox" :value="s.value" v-model="selectedSeasons" />
+                          <span>{{ s.label }}</span>
+                        </label>
+                      </div>
+                      <p v-if="errors.seasons" class="text-xs text-red-600">{{ errors.seasons }}</p>
+                    </div>
+
+                    <div class="space-y-2">
+                      <div class="text-sm font-medium">Тип страви (можна кілька)</div>
+                      <div class="grid grid-cols-2 gap-2">
+                        <label v-for="t in DISH_TYPES" :key="t.value" class="flex items-center gap-2 text-sm">
+                          <input type="checkbox" :value="t.value" v-model="selectedDishTypes" />
+                          <span>{{ t.label }}</span>
+                        </label>
+                      </div>
+                      <p v-if="errors.dishTypes" class="text-xs text-red-600">{{ errors.dishTypes }}</p>
+                    </div>
+
+                    <div class="flex items-center gap-2">
+                      <input id="isPublic" v-model="form.is_public" type="checkbox" />
+                      <label for="isPublic" class="text-sm">Публічний рецепт</label>
+                    </div>
+                  </div>
+
+                  <!-- Right -->
+                  <div class="space-y-6">
+                    <div class="space-y-3">
+                      <div class="flex items-center justify-between">
+                        <div class="font-semibold">Інгредієнти</div>
+                        <button type="button" class="text-sm underline" @click="addIngredient">Додати</button>
+                      </div>
+
+                      <div v-for="(ing, idx) in ingredients" :key="idx" class="grid grid-cols-12 gap-2">
+                        <input v-model="ing.name" class="col-span-6 border rounded-xl px-3 py-2 text-sm" placeholder="Назва" />
+                        <input v-model.number="ing.quantity" type="number" step="0.01" class="col-span-3 border rounded-xl px-3 py-2 text-sm" placeholder="К-сть" />
+                        <input v-model="ing.unit" class="col-span-2 border rounded-xl px-3 py-2 text-sm" placeholder="Од." />
+                        <button type="button" class="col-span-1 text-sm" @click="removeIngredient(idx)">✕</button>
+                      </div>
+
+                      <p v-if="errors.ingredients" class="text-xs text-red-600">{{ errors.ingredients }}</p>
+                    </div>
+
+                    <div class="space-y-3">
+                      <div class="flex items-center justify-between">
+                        <div class="font-semibold">Кроки</div>
+                        <button type="button" class="text-sm underline" @click="addStep">Додати</button>
+                      </div>
+
+                      <div v-for="(st, idx) in steps" :key="idx" class="border rounded-2xl p-4 space-y-2">
+                        <div class="text-sm font-semibold">Крок {{ idx + 1 }}</div>
+
+                        <textarea v-model="st.text" rows="3" class="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Опис кроку" />
+
+                        <input type="file" accept="image/*" class="block w-full text-sm" @change="(e) => onStepImageChange(idx, e)" />
+
+                        <div v-if="st.previewUrl" class="rounded-2xl overflow-hidden bg-gray-100 aspect-[4/3]">
+                          <img :src="st.previewUrl" alt="" class="w-full h-full object-cover" />
+                        </div>
+
+                        <button type="button" class="text-sm underline" @click="removeStep(idx)">Видалити крок</button>
+                      </div>
+
+                      <p v-if="errors.steps" class="text-xs text-red-600">{{ errors.steps }}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div v-if="formError" class="border rounded-xl px-4 py-3 text-sm bg-gray-50 text-gray-800">
+                  {{ formError }}
+                </div>
+
+                <button
+                  type="submit"
+                  class="rounded-full bg-primary text-white px-6 py-2 text-sm hover:bg-orange-500 transition"
+                  :disabled="saving"
+                >
+                  {{ saving ? 'Збереження…' : 'Зберегти' }}
+                </button>
+              </form>
+            </div>
+          </template>
+
+          <script setup lang="ts">
+          definePageMeta({ middleware: 'auth' })
+
+          const router = useRouter()
+          const client = useSupabaseClient()
+          const user = useSupabaseUser()
+
+          const SEASONS = [
+            { value: 'winter', label: 'Зима' },
+            { value: 'spring', label: 'Весна' },
+            { value: 'summer', label: 'Літо' },
+            { value: 'autumn', label: 'Осінь' }
+          ] as const
+
+          const DISH_TYPES = [
+            { value: 'breakfast', label: 'Сніданок' },
+            { value: 'lunch', label: 'Обід' },
+            { value: 'dinner', label: 'Вечеря' },
+            { value: 'dessert', label: 'Десерт' }
+          ] as const
+
+          const form = reactive({
+            title: '',
+            description: '',
+            cook_time_minutes: 30,
+            servings: 2,
+            is_public: true
+          })
+
+          const selectedSeasons = ref<string[]>([])
+          const selectedDishTypes = ref<string[]>([])
+
+          const mainImageFile = ref<File | null>(null)
+          const mainPreviewUrl = ref<string>('')
+
+          const ingredients = ref<Array<{ name: string; quantity: number | null; unit: string }>>([])
+          const steps = ref<Array<{ text: string; file: File | null; previewUrl: string }>>([])
+
+          const saving = ref(false)
+          const formError = ref('')
+
+          const errors = reactive<Record<string, string | undefined>>({})
+
+          const resetErrors = () => {
+            Object.keys(errors).forEach(k => (errors[k] = undefined))
+            formError.value = ''
+          }
+
+          const addIngredient = () => ingredients.value.push({ name: '', quantity: null, unit: '' })
+          const removeIngredient = (idx: number) => ingredients.value.splice(idx, 1)
+
+          const addStep = () => steps.value.push({ text: '', file: null, previewUrl: '' })
+          const removeStep = (idx: number) => steps.value.splice(idx, 1)
+
+          onMounted(() => {
+            addIngredient()
+            addStep()
+          })
+
+          const onMainImageChange = (e: Event) => {
+            const file = (e.target as HTMLInputElement).files?.[0] || null
+            mainImageFile.value = file
+            mainPreviewUrl.value = file ? URL.createObjectURL(file) : ''
+          }
+
+          const onStepImageChange = (idx: number, e: Event) => {
+            const file = (e.target as HTMLInputElement).files?.[0] || null
+            steps.value[idx].file = file
+            steps.value[idx].previewUrl = file ? URL.createObjectURL(file) : ''
+          }
+
+          const validate = () => {
+            resetErrors()
+
+            if (!form.title.trim()) errors.title = 'Вкажіть назву'
+            if (!form.cook_time_minutes || form.cook_time_minutes < 1) errors.cook_time_minutes = 'Вкажіть час приготування'
+            if (!form.servings || form.servings < 1) errors.servings = 'Вкажіть базові порції'
+
+            if (!selectedSeasons.value.length) errors.seasons = 'Оберіть хоча б один сезон'
+            if (!selectedDishTypes.value.length) errors.dishTypes = 'Оберіть хоча б один тип страви'
+
+            const validIngs = ingredients.value.filter(i => i.name.trim())
+            if (!validIngs.length) errors.ingredients = 'Додайте хоча б 1 інгредієнт'
+
+            const validSteps = steps.value.filter(s => s.text.trim())
+            if (!validSteps.length) errors.steps = 'Додайте хоча б 1 крок'
+
+            return Object.values(errors).every(v => !v)
+          }
+
+          const uploadImage = async (path: string, file: File) => {
+            const { error } = await client.storage.from('recipe-images').upload(path, file, { upsert: true })
+            if (error) throw error
+            const { data } = client.storage.from('recipe-images').getPublicUrl(path)
+            return data.publicUrl
+          }
+
+          const onSubmit = async () => {
+            if (!user.value) return
+            if (!validate()) return
+
+            saving.value = true
+            try {
+              // 1) create recipe first (no image yet)
+              const { data: rec, error: recErr } = await client
+                .from('recipes')
+                .insert({
+                  author_id: user.value.id,
+                  title: form.title.trim(),
+                  description: form.description.trim(),
+                  cook_time_minutes: form.cook_time_minutes,
+                  servings: form.servings,
+                  is_public: form.is_public,
+                  // backward compat: store first selected season (optional)
+                  season: selectedSeasons.value[0] || null,
+                  main_image_url: null
+                })
+                .select('id')
+                .single()
+
+              if (recErr) throw recErr
+              const recipeId = rec.id as string
+
+              // 2) upload main image
+              if (mainImageFile.value) {
+                const ext = mainImageFile.value.name.split('.').pop() || 'jpg'
+                const url = await uploadImage(`recipes/${recipeId}/main.${ext}`, mainImageFile.value)
+                const { error } = await client.from('recipes').update({ main_image_url: url }).eq('id', recipeId)
+                if (error) throw error
+              }
+
+              // 3) insert ingredients
+              const ingRows = ingredients.value
+                .filter(i => i.name.trim())
+                .map((i, idx) => ({
+                  recipe_id: recipeId,
+                  name: i.name.trim(),
+                  quantity: i.quantity ?? 0,
+                  unit: (i.unit || '').trim(),
+                  order_index: idx
+                }))
+
+              const { error: ingErr } = await client.from('recipe_ingredients').insert(ingRows)
+              if (ingErr) throw ingErr
+
+              // 4) insert steps (first without images)
+              const stepRows = steps.value
+                .filter(s => s.text.trim())
+                .map((s, idx) => ({
+                  recipe_id: recipeId,
+                  step_number: idx + 1,
+                  text: s.text.trim(),
+                  image_url: null
+                }))
+
+              const { data: insertedSteps, error: stErr } = await client
+                .from('recipe_steps')
+                .insert(stepRows)
+                .select('id, step_number')
+
+              if (stErr) throw stErr
+
+              // 5) upload step images and patch URLs
+              for (let idx = 0; idx < steps.value.length; idx++) {
+                const file = steps.value[idx].file
+                if (!file) continue
+
+                const stepNumber = idx + 1
+                const stepRow = (insertedSteps || []).find((x: any) => x.step_number === stepNumber)
+                if (!stepRow) continue
+
+                const ext = file.name.split('.').pop() || 'jpg'
+                const url = await uploadImage(`recipes/${recipeId}/steps/${stepRow.id}.${ext}`, file)
+                const { error } = await client.from('recipe_steps').update({ image_url: url }).eq('id', stepRow.id)
+                if (error) throw error
+              }
+
+              // 6) seasons + dish types
+              const { error: sErr } = await client
+                .from('recipe_seasons')
+                .insert(selectedSeasons.value.map(season => ({ recipe_id: recipeId, season })))
+              if (sErr) throw sErr
+
+              const { error: dErr } = await client
+                .from('recipe_dish_types')
+                .insert(selectedDishTypes.value.map(dish_type => ({ recipe_id: recipeId, dish_type })))
+              if (dErr) throw dErr
+
+              // done
+              await router.push(`/recipes/${recipeId}`)
+            } catch (e: any) {
+              formError.value = String(e?.message || 'Не вдалося зберегти рецепт')
+            } finally {
+              saving.value = false
+            }
+          }
+          </script>
+          EOF
+
+          # =========================
+          # 5) pages/recipes/[id]/edit.vue
+          # Load + checkboxes + rewrite joins on save
+          # =========================
+          cat > pages/recipes/[id]/edit.vue <<'EOF'
+          <template>
+            <div class="max-w-4xl mx-auto space-y-6">
+              <h1 class="text-2xl font-semibold">Редагування рецепта</h1>
+
+              <div v-if="loading" class="text-sm text-gray-600">Завантаження…</div>
+              <div v-else-if="!recipeId" class="text-sm text-gray-600">Некоректний рецепт</div>
+
+              <form v-else class="space-y-6" @submit.prevent="onSubmit">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <!-- Left -->
+                  <div class="space-y-4">
+                    <div class="space-y-1">
+                      <label class="text-sm font-medium">Назва</label>
+                      <input
+                        v-model="form.title"
+                        type="text"
+                        autocomplete="off"
+                        class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                      />
+                      <p v-if="errors.title" class="text-xs text-red-600">{{ errors.title }}</p>
+                    </div>
+
+                    <div class="space-y-1">
+                      <label class="text-sm font-medium">Опис</label>
+                      <textarea
+                        v-model="form.description"
+                        rows="5"
+                        class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                      />
+                    </div>
+
+                    <div class="space-y-1">
+                      <label class="text-sm font-medium">Головне фото (за потреби замінити)</label>
+                      <input type="file" accept="image/*" class="block w-full text-sm" @change="onMainImageChange" />
+
+                      <div v-if="mainPreviewUrl || form.main_image_url" class="rounded-2xl overflow-hidden bg-gray-100 aspect-[4/3]">
+                        <img :src="mainPreviewUrl || form.main_image_url" alt="" class="w-full h-full object-cover" />
+                      </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div class="space-y-1">
+                        <label class="text-sm font-medium">Час (хв)</label>
+                        <input
+                          v-model.number="form.cook_time_minutes"
+                          type="number"
+                          min="1"
+                          class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                        />
+                        <p v-if="errors.cook_time_minutes" class="text-xs text-red-600">{{ errors.cook_time_minutes }}</p>
+                      </div>
+
+                      <div class="space-y-1">
+                        <label class="text-sm font-medium">Порції (базово)</label>
+                        <input
+                          v-model.number="form.servings"
+                          type="number"
+                          min="1"
+                          class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                        />
+                        <p v-if="errors.servings" class="text-xs text-red-600">{{ errors.servings }}</p>
+                      </div>
+                    </div>
+
+                    <div class="space-y-2">
+                      <div class="text-sm font-medium">Сезонність (можна кілька)</div>
+                      <div class="grid grid-cols-2 gap-2">
+                        <label v-for="s in SEASONS" :key="s.value" class="flex items-center gap-2 text-sm">
+                          <input type="checkbox" :value="s.value" v-model="selectedSeasons" />
+                          <span>{{ s.label }}</span>
+                        </label>
+                      </div>
+                      <p v-if="errors.seasons" class="text-xs text-red-600">{{ errors.seasons }}</p>
+                    </div>
+
+                    <div class="space-y-2">
+                      <div class="text-sm font-medium">Тип страви (можна кілька)</div>
+                      <div class="grid grid-cols-2 gap-2">
+                        <label v-for="t in DISH_TYPES" :key="t.value" class="flex items-center gap-2 text-sm">
+                          <input type="checkbox" :value="t.value" v-model="selectedDishTypes" />
+                          <span>{{ t.label }}</span>
+                        </label>
+                      </div>
+                      <p v-if="errors.dishTypes" class="text-xs text-red-600">{{ errors.dishTypes }}</p>
+                    </div>
+
+                    <div class="flex items-center gap-2">
+                      <input id="isPublic" v-model="form.is_public" type="checkbox" />
+                      <label for="isPublic" class="text-sm">Публічний рецепт</label>
+                    </div>
+                  </div>
+
+                  <!-- Right -->
+                  <div class="space-y-6">
+                    <div class="space-y-3">
+                      <div class="flex items-center justify-between">
+                        <div class="font-semibold">Інгредієнти</div>
+                        <button type="button" class="text-sm underline" @click="addIngredient">Додати</button>
+                      </div>
+
+                      <div v-for="(ing, idx) in ingredients" :key="idx" class="grid grid-cols-12 gap-2">
+                        <input v-model="ing.name" class="col-span-6 border rounded-xl px-3 py-2 text-sm" placeholder="Назва" />
+                        <input v-model.number="ing.quantity" type="number" step="0.01" class="col-span-3 border rounded-xl px-3 py-2 text-sm" placeholder="К-сть" />
+                        <input v-model="ing.unit" class="col-span-2 border rounded-xl px-3 py-2 text-sm" placeholder="Од." />
+                        <button type="button" class="col-span-1 text-sm" @click="removeIngredient(idx)">✕</button>
+                      </div>
+
+                      <p v-if="errors.ingredients" class="text-xs text-red-600">{{ errors.ingredients }}</p>
+                    </div>
+
+                    <div class="space-y-3">
+                      <div class="flex items-center justify-between">
+                        <div class="font-semibold">Кроки</div>
+                        <button type="button" class="text-sm underline" @click="addStep">Додати</button>
+                      </div>
+
+                      <div v-for="(st, idx) in steps" :key="idx" class="border rounded-2xl p-4 space-y-2">
+                        <div class="text-sm font-semibold">Крок {{ idx + 1 }}</div>
+
+                        <textarea v-model="st.text" rows="3" class="w-full border rounded-xl px-3 py-2 text-sm" placeholder="Опис кроку" />
+
+                        <input type="file" accept="image/*" class="block w-full text-sm" @change="(e) => onStepImageChange(idx, e)" />
+
+                        <div v-if="st.previewUrl || st.image_url" class="rounded-2xl overflow-hidden bg-gray-100 aspect-[4/3]">
+                          <img :src="st.previewUrl || st.image_url" alt="" class="w-full h-full object-cover" />
+                        </div>
+
+                        <button type="button" class="text-sm underline" @click="removeStep(idx)">Видалити крок</button>
+                      </div>
+
+                      <p v-if="errors.steps" class="text-xs text-red-600">{{ errors.steps }}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div v-if="formError" class="border rounded-xl px-4 py-3 text-sm bg-gray-50 text-gray-800">
+                  {{ formError }}
+                </div>
+
+                <button
+                  type="submit"
+                  class="rounded-full bg-primary text-white px-6 py-2 text-sm hover:bg-orange-500 transition"
+                  :disabled="saving"
+                >
+                  {{ saving ? 'Збереження…' : 'Зберегти зміни' }}
+                </button>
+              </form>
+            </div>
+          </template>
+
+          <script setup lang="ts">
+          definePageMeta({ middleware: 'auth' })
+
+          const route = useRoute()
+          const router = useRouter()
+          const client = useSupabaseClient()
+          const user = useSupabaseUser()
+
+          const recipeId = computed(() => route.params.id as string)
+
+          const SEASONS = [
+            { value: 'winter', label: 'Зима' },
+            { value: 'spring', label: 'Весна' },
+            { value: 'summer', label: 'Літо' },
+            { value: 'autumn', label: 'Осінь' }
+          ] as const
+
+          const DISH_TYPES = [
+            { value: 'breakfast', label: 'Сніданок' },
+            { value: 'lunch', label: 'Обід' },
+            { value: 'dinner', label: 'Вечеря' },
+            { value: 'dessert', label: 'Десерт' }
+          ] as const
+
+          const loading = ref(true)
+          const saving = ref(false)
+          const formError = ref('')
+
+          const form = reactive({
+            title: '',
+            description: '',
+            cook_time_minutes: 30,
+            servings: 2,
+            is_public: true,
+            main_image_url: ''
+          })
+
+          const selectedSeasons = ref<string[]>([])
+          const selectedDishTypes = ref<string[]>([])
+
+          const mainImageFile = ref<File | null>(null)
+          const mainPreviewUrl = ref<string>('')
+
+          const ingredients = ref<Array<{ name: string; quantity: number | null; unit: string }>>([])
+          const steps = ref<Array<{ text: string; file: File | null; previewUrl: string; image_url: string | null }>>([])
+
+          const errors = reactive<Record<string, string | undefined>>({})
+
+          const resetErrors = () => {
+            Object.keys(errors).forEach(k => (errors[k] = undefined))
+            formError.value = ''
+          }
+
+          const addIngredient = () => ingredients.value.push({ name: '', quantity: null, unit: '' })
+          const removeIngredient = (idx: number) => ingredients.value.splice(idx, 1)
+
+          const addStep = () => steps.value.push({ text: '', file: null, previewUrl: '', image_url: null })
+          const removeStep = (idx: number) => steps.value.splice(idx, 1)
+
+          const onMainImageChange = (e: Event) => {
+            const file = (e.target as HTMLInputElement).files?.[0] || null
+            mainImageFile.value = file
+            mainPreviewUrl.value = file ? URL.createObjectURL(file) : ''
+          }
+
+          const onStepImageChange = (idx: number, e: Event) => {
+            const file = (e.target as HTMLInputElement).files?.[0] || null
+            steps.value[idx].file = file
+            steps.value[idx].previewUrl = file ? URL.createObjectURL(file) : ''
+          }
+
+          const validate = () => {
+            resetErrors()
+
+            if (!form.title.trim()) errors.title = 'Вкажіть назву'
+            if (!form.cook_time_minutes || form.cook_time_minutes < 1) errors.cook_time_minutes = 'Вкажіть час приготування'
+            if (!form.servings || form.servings < 1) errors.servings = 'Вкажіть базові порції'
+
+            if (!selectedSeasons.value.length) errors.seasons = 'Оберіть хоча б один сезон'
+            if (!selectedDishTypes.value.length) errors.dishTypes = 'Оберіть хоча б один тип страви'
+
+            const validIngs = ingredients.value.filter(i => i.name.trim())
+            if (!validIngs.length) errors.ingredients = 'Додайте хоча б 1 інгредієнт'
+
+            const validSteps = steps.value.filter(s => s.text.trim())
+            if (!validSteps.length) errors.steps = 'Додайте хоча б 1 крок'
+
+            return Object.values(errors).every(v => !v)
+          }
+
+          const uploadImage = async (path: string, file: File) => {
+            const { error } = await client.storage.from('recipe-images').upload(path, file, { upsert: true })
+            if (error) throw error
+            const { data } = client.storage.from('recipe-images').getPublicUrl(path)
+            return data.publicUrl
+          }
+
+          const load = async () => {
+            loading.value = true
+            try {
+              const { data, error } = await client
+                .from('recipes')
+                .select(`
+                  id, author_id, title, description, main_image_url, cook_time_minutes, servings, is_public,
+                  recipe_ingredients(*),
+                  recipe_steps(*),
+                  recipe_seasons(season),
+                  recipe_dish_types(dish_type)
+                `)
+                .eq('id', recipeId.value)
+                .maybeSingle()
+
+              if (error) throw error
+              if (!data) throw new Error('Рецепт не знайдено')
+
+              if (!user.value || data.author_id !== user.value.id) {
+                await router.push(`/recipes/${recipeId.value}`)
+                return
+              }
+
+              form.title = data.title || ''
+              form.description = data.description || ''
+              form.main_image_url = data.main_image_url || ''
+              form.cook_time_minutes = data.cook_time_minutes || 30
+              form.servings = data.servings || 2
+              form.is_public = !!data.is_public
+
+              selectedSeasons.value = (data.recipe_seasons || []).map((x: any) => x.season)
+              selectedDishTypes.value = (data.recipe_dish_types || []).map((x: any) => x.dish_type)
+
+              ingredients.value = (data.recipe_ingredients || [])
+                .sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0))
+                .map((x: any) => ({ name: x.name || '', quantity: Number(x.quantity ?? 0), unit: x.unit || '' }))
+
+              steps.value = (data.recipe_steps || [])
+                .sort((a: any, b: any) => (a.step_number ?? 0) - (b.step_number ?? 0))
+                .map((x: any) => ({ text: x.text || '', file: null, previewUrl: '', image_url: x.image_url || null }))
+
+              if (!ingredients.value.length) addIngredient()
+              if (!steps.value.length) addStep()
+            } catch (e: any) {
+              formError.value = String(e?.message || 'Не вдалося завантажити рецепт')
+            } finally {
+              loading.value = false
+            }
+          }
+
+          onMounted(load)
+
+          const onSubmit = async () => {
+            if (!user.value) return
+            if (!validate()) return
+
+            saving.value = true
+            try {
+              // 1) update recipe base fields
+              const { error: upErr } = await client
+                .from('recipes')
+                .update({
+                  title: form.title.trim(),
+                  description: form.description.trim(),
+                  cook_time_minutes: form.cook_time_minutes,
+                  servings: form.servings,
+                  is_public: form.is_public,
+                  // backward compat: first selected season (optional)
+                  season: selectedSeasons.value[0] || null
+                })
+                .eq('id', recipeId.value)
+
+              if (upErr) throw upErr
+
+              // 2) replace main image if provided
+              if (mainImageFile.value) {
+                const ext = mainImageFile.value.name.split('.').pop() || 'jpg'
+                const url = await uploadImage(`recipes/${recipeId.value}/main.${ext}`, mainImageFile.value)
+                const { error } = await client.from('recipes').update({ main_image_url: url }).eq('id', recipeId.value)
+                if (error) throw error
+              }
+
+              // 3) rewrite ingredients
+              await client.from('recipe_ingredients').delete().eq('recipe_id', recipeId.value)
+
+              const ingRows = ingredients.value
+                .filter(i => i.name.trim())
+                .map((i, idx) => ({
+                  recipe_id: recipeId.value,
+                  name: i.name.trim(),
+                  quantity: i.quantity ?? 0,
+                  unit: (i.unit || '').trim(),
+                  order_index: idx
+                }))
+
+              const { error: ingErr } = await client.from('recipe_ingredients').insert(ingRows)
+              if (ingErr) throw ingErr
+
+              // 4) rewrite steps
+              await client.from('recipe_steps').delete().eq('recipe_id', recipeId.value)
+
+              const stepRows = steps.value
+                .filter(s => s.text.trim())
+                .map((s, idx) => ({
+                  recipe_id: recipeId.value,
+                  step_number: idx + 1,
+                  text: s.text.trim(),
+                  image_url: null
+                }))
+
+              const { data: insertedSteps, error: stErr } = await client
+                .from('recipe_steps')
+                .insert(stepRows)
+                .select('id, step_number')
+
+              if (stErr) throw stErr
+
+              // upload step images
+              for (let idx = 0; idx < steps.value.length; idx++) {
+                const file = steps.value[idx].file
+                if (!file) continue
+
+                const stepNumber = idx + 1
+                const stepRow = (insertedSteps || []).find((x: any) => x.step_number === stepNumber)
+                if (!stepRow) continue
+
+                const ext = file.name.split('.').pop() || 'jpg'
+                const url = await uploadImage(`recipes/${recipeId.value}/steps/${stepRow.id}.${ext}`, file)
+                const { error } = await client.from('recipe_steps').update({ image_url: url }).eq('id', stepRow.id)
+                if (error) throw error
+              }
+
+              // 5) rewrite seasons + dish types
+              await client.from('recipe_seasons').delete().eq('recipe_id', recipeId.value)
+              const { error: sErr } = await client
+                .from('recipe_seasons')
+                .insert(selectedSeasons.value.map(season => ({ recipe_id: recipeId.value, season })))
+              if (sErr) throw sErr
+
+              await client.from('recipe_dish_types').delete().eq('recipe_id', recipeId.value)
+              const { error: dErr } = await client
+                .from('recipe_dish_types')
+                .insert(selectedDishTypes.value.map(dish_type => ({ recipe_id: recipeId.value, dish_type })))
+              if (dErr) throw dErr
+
+              await router.push(`/recipes/${recipeId.value}`)
+            } catch (e: any) {
+              formError.value = String(e?.message || 'Не вдалося зберегти зміни')
+            } finally {
+              saving.value = false
+            }
+          }
+          </script>
+          EOF
+
+          echo "TASK004-CLASSIFICATION1 applied."
+
+      - name: Commit changes (if any)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git add -A
+          git commit -m "TASK004-CLASSIFICATION1: multi seasons + dish types + search keyword parsing"
+
+      - name: Push
+        shell: bash
+        run: |
+          git push origin "HEAD:${GITHUB_REF_NAME}"
