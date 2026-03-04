@@ -1,0 +1,64 @@
+name: TASK005-BACK-NAV - Back to recipes component
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  task:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+
+      - name: Create BackToRecipes component
+        run: |
+
+          mkdir -p components
+
+          cat > components/BackToRecipes.vue <<'EOF'
+          <template>
+            <button
+              @click="goBack"
+              class="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
+            >
+              ← Назад до рецептів
+            </button>
+          </template>
+
+          <script setup lang="ts">
+          const router = useRouter()
+
+          const goBack = () => {
+            if (window.history.length > 2) {
+              router.back()
+            } else {
+              router.push('/')
+            }
+          }
+          </script>
+          EOF
+
+      - name: Patch recipe page
+        run: |
+
+          FILE="pages/recipes/[id].vue"
+
+          if [ -f "$FILE" ]; then
+
+          sed -i '0,/h1/s//<BackToRecipes class="mb-2" \/>\n<h1/' "$FILE"
+
+          fi
+
+      - name: Commit
+        run: |
+          git add .
+          git commit -m "TASK005: back to recipes navigation component"
+          git push
