@@ -17,15 +17,32 @@
                 <form class="w-full max-w-xl" @submit.prevent="onSearch">
                     <div class="relative">
                         <input v-model="q" type="text" class="w-full border border-gray-300 rounded-full pl-4 pr-12 py-2 text-sm
-                       focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                   focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                             placeholder="Пошук за назвою або інгредієнтами…" />
                         <button type="submit" class="absolute right-1 top-1/2 -translate-y-1/2 px-3 py-1.5 rounded-full text-sm
-                       border border-gray-300 hover:bg-gray-50" aria-label="Search">
+                   border border-gray-300 hover:bg-gray-50" aria-label="Search">
                             🔎
                         </button>
                     </div>
                 </form>
             </div>
+
+            <!-- ✅ Added: menu items for logged-in user -->
+            <nav v-if="user" class="hidden lg:flex items-center gap-3 shrink-0">
+                <NuxtLink
+                    to="/my/recipes"
+                    class="text-sm text-gray-700 hover:text-gray-900"
+                >
+                    Мої рецепти
+                </NuxtLink>
+
+                <NuxtLink
+                    to="/my/saved"
+                    class="text-sm text-gray-700 hover:text-gray-900"
+                >
+                    Збережені рецепти
+                </NuxtLink>
+            </nav>
 
             <!-- Right: auth / actions -->
             <div class="flex items-center gap-2 shrink-0">
