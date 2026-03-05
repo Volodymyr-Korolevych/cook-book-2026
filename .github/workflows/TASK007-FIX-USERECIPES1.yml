@@ -1,0 +1,121 @@
+name: TASK007-FIX-USERECIPES1 - Include seasons/types relations in useRecipes selects
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  task:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Replace composables/useRecipes.ts (minimal fix)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p composables
+
+          cat > composables/useRecipes.ts <<'EOF'
+          // composables/useRecipes.ts
+          export function useRecipes() {
+            const client = useSupabaseClient()
+
+            const getSeasonalRecipes = async () => {
+              const month = new Date().getMonth() + 1
+              const season =
+                month === 12 || month <= 2
+                  ? 'winter'
+                  : month <= 5
+                  ? 'spring'
+                  : month <= 8
+                  ? 'summer'
+                  : 'autumn'
+
+              const { data, error } = await client
+                .from('recipes')
+                .select('*, recipe_seasons!inner(season), recipe_dish_types(dish_type)')
+                .eq('is_public', true)
+                .eq('recipe_seasons.season', season)
+                .limit(8)
+
+              if (error) throw error
+              return data || []
+            }
+
+            const getLatestRecipes = async () => {
+              const { data, error } = await client
+                .from('recipes')
+                .select('*, recipe_seasons(season), recipe_dish_types(dish_type)')
+                .eq('is_public', true)
+                .order('created_at', { ascending: false })
+                .limit(12)
+
+              if (error) throw error
+              return data || []
+            }
+
+            const getRecipeById = async (id: string) => {
+              const { data, error } = await client
+                .from('recipes')
+                .select(
+                  `
+                  *,
+                  recipe_ingredients (*),
+                  recipe_steps (*),
+                  recipe_seasons (season),
+                  recipe_dish_types (dish_type)
+                `
+                )
+                .eq('id', id)
+                .maybeSingle()
+
+              if (error) throw error
+              return data
+            }
+
+            const searchRecipes = async (q: string) => {
+              const { data, error } = await client
+                .from('recipes')
+                .select('*, recipe_seasons(season), recipe_dish_types(dish_type)')
+                .eq('is_public', true)
+                .or(`title.ilike.%${q}%,description.ilike.%${q}%`)
+              if (error) throw error
+              return data || []
+            }
+
+            return {
+              getSeasonalRecipes,
+              getLatestRecipes,
+              getRecipeById,
+              searchRecipes
+            }
+          }
+          EOF
+
+      - name: Commit changes (if any)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git add -A
+          git commit -m "TASK007: fix useRecipes selects to include recipe_seasons and recipe_dish_types"
+
+      - name: Push
+        shell: bash
+        run: |
+          git push origin "HEAD:${GITHUB_REF_NAME}"
