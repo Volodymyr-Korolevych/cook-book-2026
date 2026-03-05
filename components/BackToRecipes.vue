@@ -1,7 +1,7 @@
 <template>
   <button
     @click="goBack"
-    class="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
+    class="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 pt-4"
   >
     ← Назад до рецептів
   </button>
