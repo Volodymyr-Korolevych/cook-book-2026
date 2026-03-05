@@ -76,8 +76,13 @@
         <back-to-recipes />
         <div class="space-y-1">
           <h1 class="text-2xl font-semibold">{{ recipe.title }}</h1>
+
           <div class="text-xs text-gray-600 flex flex-wrap gap-x-3 gap-y-1">
             <div>Автор: {{ recipe.author_name || '—' }}</div>
+
+            <div v-if="seasonText">Сезон: {{ seasonText }}</div>
+            <div v-if="dishTypeText">Тип: {{ dishTypeText }}</div>
+
             <div v-if="recipe.cook_time_minutes">Час: {{ recipe.cook_time_minutes }} хв</div>
             <div>Статус: {{ recipe.is_public ? 'публічний' : 'приватний' }}</div>
           </div>
@@ -132,6 +137,20 @@
 </template>
 
 <script setup lang="ts">
+const SEASON_LABEL: Record<string, string> = {
+  winter: 'Зима',
+  spring: 'Весна',
+  summer: 'Літо',
+  autumn: 'Осінь'
+}
+
+const DISH_LABEL: Record<string, string> = {
+  breakfast: 'Сніданок',
+  lunch: 'Обід',
+  dinner: 'Вечеря',
+  dessert: 'Десерт'
+}
+
 const route = useRoute()
 const router = useRouter()
 const client = useSupabaseClient()
@@ -168,8 +187,32 @@ const scaledIngredients = computed(() => {
   }))
 })
 
+const seasons = computed<string[]>(() => {
+  const rel = recipe.value?.recipe_seasons ?? []
+  const values = rel
+    .map((x: any) => (typeof x === 'string' ? x : x?.season))
+    .filter((v: any) => typeof v === 'string' && v.length > 0) as string[]
+
+  if (values.length) return Array.from(new Set(values))
+
+  // fallback: old single season
+  const s = recipe.value?.season
+  return s ? [s] : []
+})
+
+const dishTypes = computed<string[]>(() => {
+  const rel = recipe.value?.recipe_dish_types ?? []
+  const values = rel
+    .map((x: any) => (typeof x === 'string' ? x : x?.dish_type))
+    .filter((v: any) => typeof v === 'string' && v.length > 0) as string[]
+
+  return Array.from(new Set(values))
+})
+
+const seasonText = computed(() => seasons.value.map((s) => SEASON_LABEL[s] || s).join(', '))
+const dishTypeText = computed(() => dishTypes.value.map((t) => DISH_LABEL[t] || t).join(', '))
+
 const formatQty = (n: number) => {
-  // simple formatting: keep up to 2 decimals, trim trailing zeros
   const fixed = n.toFixed(2)
   return fixed.replace(/\.?0+$/, '')
 }
@@ -186,7 +229,6 @@ const isAuthor = computed(() => {
 })
 
 const canSave = computed(() => {
-  // guest: no save, author: no save button (optional)
   return !!user.value && !isAuthor.value
 })
 
@@ -198,7 +240,9 @@ const load = async () => {
       .select(`
         id, title, description, main_image_url, cook_time_minutes, servings, season, is_public, author_id, created_at,
         recipe_ingredients(*),
-        recipe_steps(*)
+        recipe_steps(*),
+        recipe_seasons(season),
+        recipe_dish_types(dish_type)
       `)
       .eq('id', id)
       .maybeSingle()
@@ -212,9 +256,12 @@ const load = async () => {
     recipe.value = data
     servings.value = Number(data.servings || 2)
 
-    // Try to fetch author display name if profiles table exists
     if (data.author_id) {
-      const { data: prof } = await client.from('profiles').select('display_name').eq('id', data.author_id).maybeSingle()
+      const { data: prof } = await client
+        .from('profiles')
+        .select('display_name')
+        .eq('id', data.author_id)
+        .maybeSingle()
       recipe.value.author_name = prof?.display_name || null
     }
   } catch {
