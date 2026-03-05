@@ -73,8 +73,7 @@
 
       <!-- Right: title + meta + description + steps -->
       <div class="space-y-4">
-        <back-to-recipes />
-        <div class="space-y-1 px-4">
+        <div class="space-y-1">
           <h1 class="text-2xl font-semibold">{{ recipe.title }}</h1>
 
           <div class="text-xs text-gray-600 flex flex-wrap gap-x-3 gap-y-1">
@@ -110,13 +109,34 @@
 
         <div class="flex items-center gap-2">
           <button
-            v-if="canSave"
+            v-if="canSave && saveStatus === 'idle'"
             class="rounded-full border border-gray-300 px-4 py-2 text-sm hover:bg-gray-50"
             @click="onSave"
             type="button"
           >
             Зберегти в папці "Збережені рецепти"
           </button>
+
+          <div
+            v-if="canSave && saveStatus === 'success'"
+            class="text-sm text-gray-700"
+          >
+            Рецепт додано до папки "Збережені рецепти"
+          </div>
+
+          <div
+            v-if="canSave && saveStatus === 'exists'"
+            class="text-sm text-gray-700"
+          >
+            Рецепт уже знаходиться в папці "Збережені рецепти"
+          </div>
+
+          <div
+            v-if="canSave && saveStatus === 'error'"
+            class="text-sm text-gray-700"
+          >
+            Не вдалося зберегти рецепт
+          </div>
 
           <button
             v-if="isAuthor"
@@ -126,10 +146,6 @@
           >
             Редагувати
           </button>
-        </div>
-
-        <div v-if="message" class="text-sm text-gray-700">
-          {{ message }}
         </div>
       </div>
     </div>
@@ -162,7 +178,7 @@ const loading = ref(true)
 const recipe = ref<any | null>(null)
 
 const servings = ref<number>(2)
-const message = ref<string>('')
+const saveStatus = ref<'idle' | 'success' | 'exists' | 'error'>('idle')
 
 const baseServings = computed(() => Number(recipe.value?.servings || 1))
 
@@ -195,7 +211,6 @@ const seasons = computed<string[]>(() => {
 
   if (values.length) return Array.from(new Set(values))
 
-  // fallback: old single season
   const s = recipe.value?.season
   return s ? [s] : []
 })
@@ -264,6 +279,19 @@ const load = async () => {
         .maybeSingle()
       recipe.value.author_name = prof?.display_name || null
     }
+
+    if (user.value && data.id && !isAuthor.value) {
+      const { data: saved } = await client
+        .from('saved_recipes')
+        .select('recipe_id')
+        .eq('user_id', user.value.id)
+        .eq('recipe_id', data.id)
+        .maybeSingle()
+
+      saveStatus.value = saved ? 'exists' : 'idle'
+    } else {
+      saveStatus.value = 'idle'
+    }
   } catch {
     recipe.value = null
   } finally {
@@ -275,16 +303,16 @@ onMounted(load)
 
 const onSave = async () => {
   if (!user.value) return
-  message.value = ''
+  saveStatus.value = 'idle'
   try {
     const { error } = await client.from('saved_recipes').insert({
       user_id: user.value.id,
       recipe_id: recipe.value.id
     })
     if (error) throw error
-    message.value = 'Додано до збережених'
+    saveStatus.value = 'success'
   } catch {
-    message.value = 'Не вдалося зберегти рецепт'
+    saveStatus.value = 'error'
   }
 }
 </script>
