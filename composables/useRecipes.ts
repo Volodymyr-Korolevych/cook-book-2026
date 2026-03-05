@@ -15,9 +15,9 @@ export function useRecipes() {
 
     const { data, error } = await client
       .from('recipes')
-      .select('*')
+      .select('*, recipe_seasons!inner(season), recipe_dish_types(dish_type)')
       .eq('is_public', true)
-      .eq('season', season)
+      .eq('recipe_seasons.season', season)
       .limit(8)
 
     if (error) throw error
@@ -27,7 +27,7 @@ export function useRecipes() {
   const getLatestRecipes = async () => {
     const { data, error } = await client
       .from('recipes')
-      .select('*')
+      .select('*, recipe_seasons(season), recipe_dish_types(dish_type)')
       .eq('is_public', true)
       .order('created_at', { ascending: false })
       .limit(12)
@@ -43,7 +43,9 @@ export function useRecipes() {
         `
         *,
         recipe_ingredients (*),
-        recipe_steps (*)
+        recipe_steps (*),
+        recipe_seasons (season),
+        recipe_dish_types (dish_type)
       `
       )
       .eq('id', id)
@@ -56,7 +58,7 @@ export function useRecipes() {
   const searchRecipes = async (q: string) => {
     const { data, error } = await client
       .from('recipes')
-      .select('*')
+      .select('*, recipe_seasons(season), recipe_dish_types(dish_type)')
       .eq('is_public', true)
       .or(`title.ilike.%${q}%,description.ilike.%${q}%`)
     if (error) throw error
