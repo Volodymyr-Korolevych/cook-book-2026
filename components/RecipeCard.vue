@@ -53,7 +53,11 @@ const DISH_LABEL: Record<string, string> = {
 }
 
 // Simple author cache to avoid repeated per-card requests
-const authorCache = (globalThis as any).__authorCache || ((globalThis as any).__authorCache = new Map<string, string>())
+const authorCache =
+  (globalThis as any).__authorCache || ((globalThis as any).__authorCache = new Map<string, string>())
+
+type SeasonRel = { season?: string | null } | string
+type DishRel = { dish_type?: string | null } | string
 
 type Recipe = {
   id: string
@@ -63,9 +67,9 @@ type Recipe = {
   author_name?: string | null
   author_id?: string | null
 
-  // new relations (if selected in query)
-  recipe_seasons?: Array<{ season: string }>
-  recipe_dish_types?: Array<{ dish_type: string }>
+  // relations
+  recipe_seasons?: SeasonRel[]
+  recipe_dish_types?: DishRel[]
 
   // backward-compat (old single season)
   season?: string | null
@@ -80,8 +84,12 @@ const cookTime = computed(() => {
 })
 
 const seasons = computed<string[]>(() => {
-  const rel = props.recipe.recipe_seasons?.map(x => x.season).filter(Boolean) ?? []
-  if (rel.length) return Array.from(new Set(rel))
+  const rel = props.recipe.recipe_seasons ?? []
+  const values = rel
+    .map((x: any) => (typeof x === 'string' ? x : x?.season))
+    .filter((v: any) => typeof v === 'string' && v.length > 0) as string[]
+
+  if (values.length) return Array.from(new Set(values))
 
   // fallback: old single season
   const s = props.recipe.season
@@ -89,12 +97,16 @@ const seasons = computed<string[]>(() => {
 })
 
 const dishTypes = computed<string[]>(() => {
-  const rel = props.recipe.recipe_dish_types?.map(x => x.dish_type).filter(Boolean) ?? []
-  return Array.from(new Set(rel))
+  const rel = props.recipe.recipe_dish_types ?? []
+  const values = rel
+    .map((x: any) => (typeof x === 'string' ? x : x?.dish_type))
+    .filter((v: any) => typeof v === 'string' && v.length > 0) as string[]
+
+  return Array.from(new Set(values))
 })
 
-const seasonText = computed(() => seasons.value.map(s => SEASON_LABEL[s] || s).join(', '))
-const dishTypeText = computed(() => dishTypes.value.map(t => DISH_LABEL[t] || t).join(', '))
+const seasonText = computed(() => seasons.value.map((s) => SEASON_LABEL[s] || s).join(', '))
+const dishTypeText = computed(() => dishTypes.value.map((t) => DISH_LABEL[t] || t).join(', '))
 
 const authorLabel = ref<string>('Автор')
 
