@@ -38,13 +38,27 @@
             </div>
 
             <input
+              ref="mainImageInput"
               type="file"
               accept="image/*"
-              class="block w-full text-sm"
+              class="hidden"
               @change="onMainImageChange"
             />
 
-            <div v-if="mainPreviewUrl || form.main_image_url" class="rounded-2xl overflow-hidden bg-gray-100 aspect-[4/3]">
+            <div
+              v-if="!(mainPreviewUrl || form.main_image_url)"
+              class="rounded-2xl border border-dashed border-gray-300 bg-gray-50 aspect-[4/3] flex flex-col items-center justify-center gap-2 cursor-pointer hover:bg-gray-100 transition"
+              @click="openMainImagePicker"
+            >
+              <div class="text-3xl">📷</div>
+              <div class="text-sm text-gray-700">Додати зображення</div>
+            </div>
+
+            <div
+              v-else
+              class="rounded-2xl overflow-hidden bg-gray-100 aspect-[4/3] cursor-pointer"
+              @click="openMainImagePicker"
+            >
               <img :src="mainPreviewUrl || form.main_image_url" alt="" class="w-full h-full object-cover" />
             </div>
           </div>
@@ -140,9 +154,28 @@
                   </button>
                 </div>
 
-                <input type="file" accept="image/*" class="block w-full text-sm" @change="(e) => onStepImageChange(idx, e)" />
+                <input
+                  :ref="(el) => setStepImageInput(el, idx)"
+                  type="file"
+                  accept="image/*"
+                  class="hidden"
+                  @change="(e) => onStepImageChange(idx, e)"
+                />
 
-                <div v-if="st.previewUrl || st.image_url" class="rounded-2xl overflow-hidden bg-gray-100 aspect-[4/3]">
+                <div
+                  v-if="!(st.previewUrl || st.image_url)"
+                  class="rounded-2xl border border-dashed border-gray-300 bg-gray-50 aspect-[4/3] flex flex-col items-center justify-center gap-2 cursor-pointer hover:bg-gray-100 transition"
+                  @click="openStepImagePicker(idx)"
+                >
+                  <div class="text-3xl">📷</div>
+                  <div class="text-sm text-gray-700">Додати зображення</div>
+                </div>
+
+                <div
+                  v-else
+                  class="rounded-2xl overflow-hidden bg-gray-100 aspect-[4/3] cursor-pointer"
+                  @click="openStepImagePicker(idx)"
+                >
                   <img :src="st.previewUrl || st.image_url" alt="" class="w-full h-full object-cover" />
                 </div>
               </div>
@@ -187,6 +220,8 @@ const formError = ref('')
 
 const mainImageFile = ref<File | null>(null)
 const mainPreviewUrl = ref<string>('')
+const mainImageInput = ref<HTMLInputElement | null>(null)
+const stepImageInputs = ref<(HTMLInputElement | null)[]>([])
 
 const form = reactive({
   title: '',
@@ -210,7 +245,22 @@ const addIngredient = () => form.ingredients.push({ _key: makeKey(), name: '', q
 const removeIngredient = (idx: number) => form.ingredients.splice(idx, 1)
 
 const addStep = () => form.steps.push({ _key: makeKey(), text: '', image_url: '' as string, file: null as File | null, previewUrl: '' as string })
-const removeStep = (idx: number) => form.steps.splice(idx, 1)
+const removeStep = (idx: number) => {
+  form.steps.splice(idx, 1)
+  stepImageInputs.value.splice(idx, 1)
+}
+
+const openMainImagePicker = () => {
+  mainImageInput.value?.click()
+}
+
+const setStepImageInput = (el: Element | ComponentPublicInstance | null, idx: number) => {
+  stepImageInputs.value[idx] = el as HTMLInputElement | null
+}
+
+const openStepImagePicker = (idx: number) => {
+  stepImageInputs.value[idx]?.click()
+}
 
 const onMainImageChange = (e: Event) => {
   const input = e.target as HTMLInputElement
@@ -225,6 +275,7 @@ const clearMainImage = async () => {
   if (mainPreviewUrl.value) URL.revokeObjectURL(mainPreviewUrl.value)
   mainPreviewUrl.value = ''
   form.main_image_url = ''
+  if (mainImageInput.value) mainImageInput.value.value = ''
 }
 
 const onStepImageChange = (idx: number, e: Event) => {
@@ -242,6 +293,7 @@ const clearStepImage = (idx: number) => {
   if (st.previewUrl) URL.revokeObjectURL(st.previewUrl)
   st.previewUrl = ''
   st.image_url = ''
+  if (stepImageInputs.value[idx]) stepImageInputs.value[idx]!.value = ''
 }
 
 const validate = () => {
