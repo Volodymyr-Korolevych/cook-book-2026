@@ -38,7 +38,7 @@ jobs:
       - name: Inject helper function
         run: |
 
-          for FILE in pages/recipes/create.vue pages/recipes/edit.vue
+          for FILE in pages/recipes/create.vue pages/recipes/[id]/edit.vue
           do
 
           sed -i '/<script setup/a\
