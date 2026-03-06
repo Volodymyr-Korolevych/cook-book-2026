@@ -72,8 +72,9 @@
       </div>
 
       <!-- Right: title + meta + description + steps -->
-      <div class="space-y-4">
-        <div class="space-y-1">
+     <div class="space-y-4">
+        <back-to-recipes />
+        <div class="space-y-1 px-4">
           <h1 class="text-2xl font-semibold">{{ recipe.title }}</h1>
 
           <div class="text-xs text-gray-600 flex flex-wrap gap-x-3 gap-y-1">
