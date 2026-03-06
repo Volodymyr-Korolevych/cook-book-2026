@@ -33,7 +33,7 @@ jobs:
           }
 
           patch_file pages/recipes/create.vue
-          patch_file pages/recipes/edit.vue
+          patch_file pages/recipes/[id]/edit.vue
 
       - name: Inject helper function
         run: |
