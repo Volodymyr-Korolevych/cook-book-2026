@@ -2,7 +2,7 @@
   <div v-if="loading" class="text-sm text-gray-600">Завантаження…</div>
 
   <div v-else-if="!recipe" class="text-sm text-gray-600">
-    Рецепт не знайдено.
+    Рецепт не знайдено
   </div>
 
   <div v-else class="space-y-6">
@@ -254,7 +254,7 @@ const load = async () => {
     const { data, error } = await client
       .from('recipes')
       .select(`
-        id, title, description, main_image_url, cook_time_minutes, servings, season, is_public, author_id, created_at,
+        id, title, description, main_image_url, cook_time_minutes, servings, is_public, author_id, created_at,
         recipe_ingredients(*),
         recipe_steps(*),
         recipe_seasons(season),

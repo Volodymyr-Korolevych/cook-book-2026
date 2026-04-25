@@ -371,13 +371,11 @@ const onSubmit = async () => {
         description: form.description.trim(),
         cook_time_minutes: form.cook_time_minutes,
         servings: form.servings,
-        is_public: form.is_public,
-        // backward compat: first selected season (optional)
-        season: selectedSeasons.value[0] || null
+        is_public: form.is_public
       })
       .eq('id', recipeId.value)
 
-    if (upErr) throw upErr
+    if (upErr) throw upErr 
 
     // 2) replace main image if provided
     if (mainImageFile.value) {

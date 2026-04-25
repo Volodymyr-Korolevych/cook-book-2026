@@ -1,16 +1,9 @@
 <template>
-  <NuxtLink
-    :to="`/recipes/${recipe.id}`"
-    class="group block rounded-2xl border border-gray-100 bg-white overflow-hidden hover:shadow-sm transition"
-  >
+  <NuxtLink :to="`/recipes/${recipe.id}`"
+    class="group block rounded-2xl border border-gray-100 bg-white overflow-hidden hover:shadow-sm transition">
     <div class="aspect-[4/3] bg-gray-100 overflow-hidden">
-      <img
-        v-if="recipe.main_image_url"
-        :src="recipe.main_image_url"
-        alt=""
-        class="w-full h-full object-cover group-hover:scale-[1.02] transition"
-        loading="lazy"
-      />
+      <img v-if="recipe.main_image_url" :src="recipe.main_image_url" alt=""
+        class="w-full h-full object-cover group-hover:scale-[1.02] transition" loading="lazy" />
       <div v-else class="w-full h-full flex items-center justify-center text-sm text-gray-500">
         Без зображення
       </div>
@@ -52,7 +45,6 @@ const DISH_LABEL: Record<string, string> = {
   dessert: 'Десерт'
 }
 
-// Simple author cache to avoid repeated per-card requests
 const authorCache =
   (globalThis as any).__authorCache || ((globalThis as any).__authorCache = new Map<string, string>())
 
@@ -66,13 +58,8 @@ type Recipe = {
   cook_time_minutes?: number | null
   author_name?: string | null
   author_id?: string | null
-
-  // relations
   recipe_seasons?: SeasonRel[]
   recipe_dish_types?: DishRel[]
-
-  // backward-compat (old single season)
-  season?: string | null
 }
 
 const props = defineProps<{ recipe: Recipe }>()
@@ -85,19 +72,17 @@ const cookTime = computed(() => {
 
 const seasons = computed<string[]>(() => {
   const rel = props.recipe.recipe_seasons ?? []
+
   const values = rel
     .map((x: any) => (typeof x === 'string' ? x : x?.season))
     .filter((v: any) => typeof v === 'string' && v.length > 0) as string[]
 
-  if (values.length) return Array.from(new Set(values))
-
-  // fallback: old single season
-  const s = props.recipe.season
-  return s ? [s] : []
+  return Array.from(new Set(values))
 })
 
 const dishTypes = computed<string[]>(() => {
   const rel = props.recipe.recipe_dish_types ?? []
+
   const values = rel
     .map((x: any) => (typeof x === 'string' ? x : x?.dish_type))
     .filter((v: any) => typeof v === 'string' && v.length > 0) as string[]

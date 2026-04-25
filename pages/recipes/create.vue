@@ -362,8 +362,6 @@ const onSubmit = async () => {
         cook_time_minutes: form.cook_time_minutes,
         servings: form.servings,
         is_public: form.is_public,
-        // backward compat: store first selected season (optional)
-        season: selectedSeasons.value[0] || null,
         main_image_url: null
       })
       .select('id')
