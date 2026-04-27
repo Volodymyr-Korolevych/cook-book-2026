@@ -27,7 +27,7 @@
         </div>
       </div>
 
-      <button @click="logout"
+      <button @click="onLogout"
         class="px-4 py-2.5 rounded-full border border-stone-300 text-sm font-medium hover:bg-stone-50 transition">
         Вийти
       </button>
