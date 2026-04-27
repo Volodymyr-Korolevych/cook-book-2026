@@ -10,7 +10,9 @@ module.exports = {
     theme: {
         extend: {
             colors: {
-                primary: '#f5a623', // м’який теплий акцент
+                primary: '#6f7f3f',
+                primaryHover: '#5f6e35',
+                surface: '#fbfaf6'
             }
         }
     },
