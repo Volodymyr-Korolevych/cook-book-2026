@@ -1,45 +1,58 @@
 <template>
-  <div class="max-w-2xl mx-auto space-y-6">
-    <h1 class="text-2xl font-semibold">Профіль</h1>
+  <div class="max-w-4xl mx-auto px-4 py-8 space-y-6">
 
-    <div class="border rounded-2xl p-5 flex items-center justify-between gap-4">
+    <div>
+      <h1 class="text-2xl font-semibold text-gray-900">Профіль</h1>
+      <p class="text-sm text-gray-500 mt-1">
+        Керуйте своїми рецептами та збереженими стравами
+      </p>
+    </div>
+
+    <!-- Profile block -->
+    <div class="bg-white rounded-2xl border border-stone-300 shadow-sm p-5 flex items-center justify-between">
       <div class="flex items-center gap-4">
-        <div class="w-14 h-14 rounded-full bg-gray-200 flex items-center justify-center text-lg font-semibold">
+
+        <div
+          class="w-12 h-12 rounded-full bg-primary text-white flex items-center justify-center text-lg font-semibold">
           {{ initials }}
         </div>
 
-        <div class="space-y-1">
-          <div class="font-semibold">
-            {{ profileName || 'Користувач' }}
+        <div>
+          <div class="font-semibold text-gray-900">
+            {{ profileName }}
           </div>
-          <div v-if="user?.email" class="text-sm text-gray-600">
+          <div  v-if="user?.email" class="text-sm text-gray-500">
             {{ user.email }}
           </div>
         </div>
       </div>
 
-      <button
-        type="button"
-        class="px-4 py-2 rounded-full border border-gray-300 text-sm hover:bg-gray-50"
-        @click="onLogout"
-      >
+      <button @click="logout"
+        class="px-4 py-2.5 rounded-full border border-stone-300 text-sm font-medium hover:bg-stone-50 transition">
         Вийти
       </button>
     </div>
 
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-      <NuxtLink to="/my/recipes" class="border rounded-2xl p-4 hover:bg-gray-50 transition">
-        <div class="font-semibold">Мої рецепти</div>
+    <!-- Actions -->
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+
+      <NuxtLink to="/my/recipes" class="rounded-2xl border border-stone-300 bg-white p-5 text-sm font-medium
+               hover:border-primary hover:shadow-sm transition">
+        Мої рецепти
       </NuxtLink>
 
-      <NuxtLink to="/my/saved" class="border rounded-2xl p-4 hover:bg-gray-50 transition">
-        <div class="font-semibold">Збережені рецепти</div>
+      <NuxtLink to="/my/saved" class="rounded-2xl border border-stone-300 bg-white p-5 text-sm font-medium
+               hover:border-primary hover:shadow-sm transition">
+        Збережені рецепти
       </NuxtLink>
 
-      <NuxtLink to="/recipes/create" class="border rounded-2xl p-4 hover:bg-gray-50 transition">
-        <div class="font-semibold">Створити рецепт</div>
+      <NuxtLink to="/recipes/create" class="rounded-2xl bg-primary text-white p-5 text-sm font-medium
+               hover:bg-primaryHover shadow-sm transition">
+        Створити рецепт
       </NuxtLink>
+
     </div>
+
   </div>
 </template>
 
