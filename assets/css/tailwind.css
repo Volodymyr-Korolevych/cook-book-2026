@@ -5,3 +5,12 @@
 body {
   @apply bg-surface text-gray-900;
 }
+html,
+body {
+  caret-color: transparent;
+}
+
+input,
+textarea {
+  caret-color: black;
+}
